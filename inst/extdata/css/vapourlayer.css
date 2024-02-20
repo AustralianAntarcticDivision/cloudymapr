@@ -1,0 +1,15 @@
+.viewport {
+    display:flex; justify-content:center; align-items:center; margin:0;
+    border:1px solid #000; touch-action:none; background-color: #2474ae20;
+    position:absolute; left:50px; top:0; overflow:hidden;
+    user-select: none; -moz-user-select: none;
+}
+.viewport::-moz-selection, .viewport::selection {
+    background-color: transparent; color: #000;
+}
+.viewport-pannable, .viewport-image, .viewport-canvas { position:absolute; } .viewport-canvas { z-index:99; }
+.viewport-image, .viewport-canvas { left:0; top:0; } /*transform-origin:top left; } */
+.vl-plot-controls { width:40px; position:relative; z-index:99; }
+.vl-plot-controls shiny-input-container { margin-top: 20px; }
+.vl-plot-controls button { padding:0; font-size:32px; height:32px; width:32px; background-color:#FFFFFF00; border:none; }
+.icon-disabled { color: #aaa; }

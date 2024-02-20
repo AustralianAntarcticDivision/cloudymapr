@@ -1,0 +1,41 @@
+Package: cloudymapr
+Type: Package
+Title: Cloud-oriented Antarctic Mapping
+Version: 0.0.4
+Authors@R: c(person("Ben", "Raymond", email = "ben.raymond@aad.gov.au", role = c("aut", "cre")),
+             person("Michael", "Sumner", email = "michael.sumner@aad.gov.au", role = "aut"),
+             person("Australian Antarctic Division", role = "cph"))
+Description: Cloud-focused Antarctic mapping functionality.
+URL: https://github.com/AustralianAntarcticDivision/cloudymapr
+BugReports: https://github.com/AustralianAntarcticDivision/cloudymapr/issues
+Depends:
+    R (>= 4.2.0)
+License: MIT + file LICENSE
+Encoding: UTF-8
+Imports:
+  abind,
+  base64enc,
+  cachem,
+  digest,
+  dplyr,
+  DT,
+  fastpng,
+  future,
+  htmltools,
+  unigd,
+  leaflet,
+  magrittr,
+  promises,
+  rlang,
+  sds,
+  sf,
+  shiny,
+  tibble,
+  uuid,
+  vapour,
+  ximage
+RoxygenNote: 7.2.3
+X-schema.org-applicationCategory: Antarctic/Southern Ocean
+X-schema.org-keywords: Antarctic, Southern Ocean, mapping
+X-schema.org-isPartOf: https://antarctica.gov.au, https://scar.org
+Remotes: coolbutuseless/fastpng, hypertidy/sds, hypertidy/vapour, hypertidy/ximage, nx10/unigd

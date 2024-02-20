@@ -1,0 +1,14 @@
+SCAR Antarctic Digital Database (ADD) Version 7.0.
+Downloaded 2016-2017 from: http://www.add.scar.org/
+
+Seamless dataset for Antarctic coastline applicable to all zoom levels. Data is a compendium of three line/polygon datasets which should display well at all zoom levels.
+
+Highest resolution data prepared by Cooper A.P.R BAS 2011 from various sources. For the line data, each segment is attributed with metadata concerning its source, updater and update time.
+
+Last updated January 2013, by Fretwell P, BAS from remote sensing imagery dating from 2011. Main areas of update: Antarctic Peninsula and South Orkney Islands. This is the most accurate vector data for land south of -60 degrees.
+
+Medium resolution data has been generalised from the high resolution dataset using ArcGIS generalisation tool with maximum offset of 100 m.
+
+Low resolution data has been generalised from the high resolution dataset using ArcGIS generalisation tool with maximum offset of 1 km.
+
+For more information, see ADD_General.txt in this folder.
