@@ -75,6 +75,17 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
     plotres <- 96 ## dpi, only used by png graphics device
     warp_opts <- c("-wm", "999")
 
+    ## https://gdalcubes.github.io/source/concepts/config.html#recommended-settings-for-cloud-access
+    vapour::vapour_set_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    vapour::vapour_set_config("VSI_CACHE", "TRUE")
+    vapour::vapour_set_config("GDAL_CACHEMAX","30%")
+    vapour::vapour_set_config("VSI_CACHE_SIZE","10000000")
+    vapour::vapour_set_config("GDAL_HTTP_MULTIPLEX","YES")
+    vapour::vapour_set_config("GDAL_INGESTED_BYTES_AT_OPEN","32000")
+    vapour::vapour_set_config("GDAL_HTTP_VERSION","2")
+    vapour::vapour_set_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES","YES")
+    vapour::vapour_set_config("GDAL_NUM_THREADS", "ALL_CPUS")
+
     moduleServer(id, function(input, output, session) {
         tmpd <- tempfile()
         dir.create(tmpd)
