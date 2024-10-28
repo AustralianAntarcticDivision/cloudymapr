@@ -256,7 +256,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             isolate(which(vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
         }
 
-        fetch_a_tile <- function(ext, z, i, id, dsn, res, type, target_crs, warp_opts) {
+        fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, ...) {
             tryCatch({
                 if (type == "raster_data") {
                     dt <- vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, options = warp_opts)
@@ -266,8 +266,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                     ## raster_image_grey
                     dt <- vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", options = warp_opts)
                 }
-                list(z = z, i = i, id = id, data = dt, type = type)
-            }, error = function(e) list(z = z, i = i, id = id, data = NULL, type = type, err = conditionMessage(e)))
+                list(data = dt, type = type, ...)
+            }, error = function(e) list(data = NULL, type = type, err = conditionMessage(e), ...))
         }
 
         handle_tile_data <- function(result) {
@@ -282,7 +282,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             }
         }
 
-        future_fetch_tile <- function(t, z, ids, i) {
+        mirai_queue <- list()
+        mirai_fetch_tile <- function(t, z, ids, i) {
             this_ext <- xywh_to_ext(x = t$xy$x[i], y = t$xy$y[i], w = t$w, h = t$h)
             cat("fetching data: ext ", this_ext, ", res ", t$res, "\n")
             ld <- layerdef()[[z]]
@@ -294,23 +295,38 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 result$id <- ids[i]
                 cat("got cached data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
                 handle_tile_data(result)
-                return(TRUE)
+                return(invisible(NULL))
             }
-            rgs <- c(rgs, list(i = i, id = ids[i]))
-            fut <- future(do.call(fetch_a_tile, rgs))
-            if (inherits(fut, "Future")) {
-                then(fut,
-                     onFulfilled = function(result) {
-                         cat("got async data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
-                         if (!is.null(cache)) cache$set(key, result[setdiff(names(result), c("i", "id"))]) ## cache it
-                         handle_tile_data(result)
-                     },
-                     onRejected = function(reason) {
-                         cat("async data failed: ", conditionMessage(reason), "\n")
-                         NULL
-                     })
-            }
+            rgs <- c(rgs, list(i = i, id = ids[i], key = key))
+            mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
+            if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- mid
         }
+
+        observe({
+            done <- c()
+            for (ji in seq_along(mirai_queue)) {
+                job <- mirai_queue[[ji]]
+                if (!inherits(job, "mirai")) {
+                    cat("job on queue is not a mirai job:"); cat(utils::str(job))
+                    done <- c(done, ji)
+                } else {
+                    if (!mirai::unresolved(job)) {
+                        result <- job$data
+                        done <- c(done, ji)
+                        cat("got async data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
+                        print(names(result))
+                        if (!is.null(result$err)) {
+                            if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("i", "id", "key"))]) ## cache it
+                            handle_tile_data(result)
+                        } else {
+                            cat("async data failed: ", conditionMessage(result$err), "\n")
+                        }
+                    }
+                }
+            }
+            if (length(done) > 0) mirai_queue <<- mirai_queue[-done]
+            shiny::invalidateLater(100)
+        })
 
         raster_plot_trigger <- reactiveVal(list(0L, NULL))
         observeEvent(raster_plot_trigger(), {
@@ -339,51 +355,7 @@ cat("--> in update_tiles_data()\n")
                 td[[z]]$img <- list(ids = ids, data = rep(list(NULL), nrow(t$xy)), xy_hash = xy_hash, data_hash = "") ##IMSRC src = rep(NA_character_, nrow(t$xy)),
                 tiles_data(td)
                 ld <- layerdef()[[z]]
-                if (TRUE) {
-                    for (i in seq_len(nrow(t$xy))) {
-                        future_fetch_tile(t, z, ids, i)
-                    }
-                } else {
-                    ## old async-based code, to remove
-                    ##async::synchronise({
-                    ##    async::async_map(seq_len(nrow(t$xy)), function(i, tl, res, dsn, type) {#, z = z, ids, target_crs, warp_opts) {
-                    ##        id <- ids[i]
-                    ##        this_ext <- xywh_to_ext(x = tl$xy$x[i], y = tl$xy$y[i], w = tl$w, h = tl$h)
-                    ##        cat("fetching data: ext ", this_ext, ", res ", res, "\n")
-                    ##        ok <- async::call_function(fetch_a_tile, ## function(i_ext, i_z, i_i, i_id, i_dsn, i_res, i_type, i_target_crs, i_warp_opts) {
-                    ##                                   ##     tryCatch({
-                    ##                                   ##         if (i_type == "raster_data") {
-                    ##                                   ##             dt <- vapour::gdal_raster_data(i_dsn, target_res = i_res, target_crs = i_target_crs, target_ext = i_ext, options = i_warp_opts)
-                    ##                                   ##         } else {
-                    ##                                   ##             ##dt <- vapour::gdal_raster_image(i_dsn, target_res = i_res, target_crs = i_target_crs, target_ext = i_ext, options = i_warp_opts)
-                    ##                                   ##             dt <- vapour::gdal_raster_data(i_dsn, bands = 1:3, target_res = i_res, target_crs = i_target_crs, target_ext = i_ext, band_output_type = "Byte", options = i_warp_opts)
-                    ##                                   ##         }
-                    ##                                   ##         list(z = i_z, i = i_i, id = i_id, data = dt, type = i_type)
-                    ##                                   ##     }, error = function(e) list(z = i_z, i = i_i, id = i_id, data = NULL, type = i_type, err = conditionMessage(e)))
-                    ##                                   ## },
-                    ##                                   ## args = list(i_ext = this_ext, i_z = z, i_i = i, i_id = id, i_dsn = dsn, i_type = type, i_res = res, i_target_crs = target_crs, i_warp_opts = warp_opts)
-                    ##                                   args = list(ext = this_ext, z = z, i = i, id = id, dsn = dsn, type = type, res = res, target_crs = target_crs, warp_opts = warp_opts)
-                    ##                                   )$then(function(resp) {
-                    ##                                       if (!is.null(resp$result$data)) {
-                    ##                                           cat("got async data for layer", resp$result$z, "tile", resp$result$i, "(id", resp$result$id, ")", utils::capture.output(utils::str(resp$result$data, max.level = 1)), "\n")
-                    ##                                           td <- isolate(tiles_data()) ##$$[[resp$result$z]]$i1
-                    ##                                           td2 <- td[[resp$result$z]]
-                    ##                                           if (resp$result$id %in% td2$img$ids) {
-                    ##                                               td2$img$data[[which(resp$result$id == td2$img$ids)]] <- resp$result$data
-                    ##                                               td2$img$data_hash <- digest::digest(td2$img$data)
-                    ##                                               td[[resp$result$z]] <- td2
-                    ##                                               tiles_data(td)
-                    ##                                               ##tiles_data[[resp$result$z]]$i1 <<- td
-                    ##                                               raster_plot_trigger(list(isolate(raster_plot_trigger())[[1]] + 1L, resp$result$z))
-                    ##                                           }
-                    ##                                       } else {
-                    ##                                           cat("async data failed for tile ", resp$result$i, " (id", resp$result$id, "): ", resp$result$err, "\n")
-                    ##                                       }
-                    ##                                   })
-                    ##    }, tl = t, res = t$res, dsn = ld$dsn, type = ld$type#, ids = ids, target_crs = target_crs, warp_opts = warp_opts
-                    ##    )
-                    ##})
-                }
+                for (i in seq_len(nrow(t$xy))) mirai_fetch_tile(t, z, ids, i)
             }
         }
 

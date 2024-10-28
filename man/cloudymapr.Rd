@@ -8,3 +8,25 @@
 \description{
 Cloud-focused Antarctic mapping functionality.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://github.com/AustralianAntarcticDivision/cloudymapr}
+  \item Report bugs at \url{https://github.com/AustralianAntarcticDivision/cloudymapr/issues}
+}
+
+}
+\author{
+\strong{Maintainer}: Ben Raymond \email{ben.raymond@aad.gov.au}
+
+Authors:
+\itemize{
+  \item Michael Sumner \email{michael.sumner@aad.gov.au}
+}
+
+Other contributors:
+\itemize{
+  \item Australian Antarctic Division [copyright holder]
+}
+
+}

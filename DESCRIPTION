@@ -1,7 +1,7 @@
 Package: cloudymapr
 Type: Package
 Title: Cloud-oriented Antarctic Mapping
-Version: 0.0.5
+Version: 0.0.5.9900
 Authors@R: c(person("Ben", "Raymond", email = "ben.raymond@aad.gov.au", role = c("aut", "cre")),
              person("Michael", "Sumner", email = "michael.sumner@aad.gov.au", role = "aut"),
              person("Australian Antarctic Division", role = "cph"))
@@ -20,12 +20,12 @@ Imports:
   dplyr,
   DT,
   fastpng,
-  future,
   htmltools,
   unigd,
   leaflet,
   magrittr,
-  promises,
+  mirai,
+  pals,
   rlang,
   sds,
   sf,
@@ -34,7 +34,7 @@ Imports:
   uuid,
   vapour,
   ximage
-RoxygenNote: 7.2.3
+RoxygenNote: 7.3.1
 X-schema.org-applicationCategory: Antarctic/Southern Ocean
 X-schema.org-keywords: Antarctic, Southern Ocean, mapping
 X-schema.org-isPartOf: https://antarctica.gov.au, https://scar.org
