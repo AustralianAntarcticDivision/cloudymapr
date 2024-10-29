@@ -375,7 +375,7 @@ cat("--> in update_tiles_data()\n")
         ## do the initial data load
         ##init_loaded <- FALSE
         observe({
-            req(layerdef())
+            req(layerdef(), view_wh())
             for (z in which_are_raster_layers()) update_tiles_data(image_def(), z)
         })
 
