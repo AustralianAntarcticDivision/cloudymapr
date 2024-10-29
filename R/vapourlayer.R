@@ -318,7 +318,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                         done <- c(done, ji)
                         cat("got async data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
                         print(names(result))
-                        if (!is.null(result$err)) {
+                        if (is.null(result$err)) {
                             if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
                         } else {
