@@ -73,7 +73,9 @@ vl_map_ui_postamble <- function() {
 #' @rdname vl_map_module
 vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2e7, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) { ##Z initial_zoom = 1, zoom_range = c(0, 6),
     plotres <- 96 ## dpi, only used by png graphics device
-    warp_opts <- c("-wm", "999")
+    .warp_opts <- c("-wm", "999")
+    ## .resampling_method <- "near"
+    .resampling_method <- "bilinear"
 
     ## https://gdalcubes.github.io/source/concepts/config.html#recommended-settings-for-cloud-access
     vapour::vapour_set_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
@@ -259,12 +261,12 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, ...) {
             tryCatch({
                 if (type == "raster_data") {
-                    dt <- vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, options = warp_opts)
+                    dt <- vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, resample = .resampling_method, options = warp_opts)
                 } else if (type == "raster_image_rgb") {
-                    dt <- vapour::gdal_raster_data(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", options = warp_opts)
+                    dt <- vapour::gdal_raster_data(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
                 } else {
                     ## raster_image_grey
-                    dt <- vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", options = warp_opts)
+                    dt <- vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
                 }
                 list(data = dt, type = type, ...)
             }, error = function(e) list(data = NULL, type = type, err = conditionMessage(e), ...))
@@ -287,7 +289,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             this_ext <- xywh_to_ext(x = t$xy$x[i], y = t$xy$y[i], w = t$w, h = t$h)
             cat("fetching data: ext ", this_ext, ", res ", t$res, "\n")
             ld <- layerdef()[[z]]
-            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs, warp_opts = warp_opts)
+            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs, warp_opts = .warp_opts)
             key <- rlang::hash(rgs)
             if (!is.null(cache) && cache$exists(key)) {
                 result <- cache$get(key)
@@ -302,6 +304,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- mid
         }
 
+        ## poll the mirai results. Can this be replaced with a shiny::ExtendedTask approach?
         observe({
             done <- c()
             for (ji in seq_along(mirai_queue)) {

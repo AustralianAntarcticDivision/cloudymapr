@@ -13,8 +13,6 @@ vl_demo <- function() {
     cst <- st_geometry(quiet_reader(file.path(qcd, "ADD_Coastline_medium_res_polygon.shp")))
     ccamlr_areas <- st_geometry(quiet_reader(file.path(qcd, "CCAMLR_StatisticalAreas.shp")))
 
-    ## plan(multisession(workers = 8))
-
     cache_obj <- cachem::cache_mem()
     ## pre-seed the cache for faster startup
     d <- dir(system.file("extdata/demo/cache_seed", package = "cloudymapr", mustWork = TRUE), full.names = TRUE)
