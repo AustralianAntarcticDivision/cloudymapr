@@ -72,10 +72,10 @@ vl_map_ui_postamble <- function() {
 #' @export
 #' @rdname vl_map_module
 vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2e7, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) { ##Z initial_zoom = 1, zoom_range = c(0, 6),
-    plotres <- 96 ## dpi, only used by png graphics device
+    .plotres <- 96 ## dpi, only used by png graphics device
     .warp_opts <- c("-wm", "999")
-    ## .resampling_method <- "near"
-    .resampling_method <- "bilinear"
+    .resampling_method <- "near"
+    ## .resampling_method <- "bilinear" ## TODO allow this to be specified on a source-by-source basis. Be aware that bilinear sampling can cause issues when the source is raster_data and it has special values like a land mask (255) but valid values are (say) 0-100: interpolation near land will give values > 100 and < 255
 
     ## https://gdalcubes.github.io/source/concepts/config.html#recommended-settings-for-cloud-access
     vapour::vapour_set_config("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
@@ -102,8 +102,11 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             cache <- cachem::cache_mem()
         }
 
-        use_fastpng <- TRUE ## otherwise use png()
-        clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible until refreshed (not quite seamless yet)
+        .use_fastpng <- TRUE ## otherwise use png()
+        .png_in_memory <- FALSE
+        .png_compression_level <- 0L ## 0L is no compression, ~0.1s to write a 2500x2500 image; 1L or 2L ~1.4s for the same image or ~0.9s with .use_png_filter = FALSE
+        .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
+        .clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible until refreshed (not quite seamless yet)
 
         ## generate our image_def from the user-supplied initial_view
         ## initial_view is list(tiles_per_side, extent(xmin, xmax, ymin, ymax), res)
@@ -112,16 +115,21 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         ## width: diff(initial_view$extent[1:2]) / initial_view$res
         ## height: diff(initial_view$extent[3:4]) / initial_view$res
 
+        ## tile width and height in map coords
+        tile_w <- diff(initial_view$extent[1:2]) / initial_view$tiles_per_side
+        tile_h <- diff(initial_view$extent[3:4]) / initial_view$tiles_per_side
+
+        ## xy centres of tiles in normalized [-1 1 -1 1] coords
         temp_xygrid <- expand.grid(x = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side,
-                              y = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side)
+                                   y = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side)
+        ## xy centres of tiles in map coords
         tempxy <- expand.grid(x = seq(initial_view$extent[1], initial_view$extent[2], length.out = initial_view$tiles_per_side + 1)[-1] - diff(initial_view$extent[1:2]) / initial_view$tiles_per_side / 2,
                               y = seq(initial_view$extent[3], initial_view$extent[4], length.out = initial_view$tiles_per_side + 1)[-1] - diff(initial_view$extent[3:4]) / initial_view$tiles_per_side / 2)
         image_def <- reactiveVal(list(tiles_per_side = initial_view$tiles_per_side,
                                       n_tiles = initial_view$tiles_per_side ^ 2,
                                       xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords
                                       xy = as.data.frame(tempxy), ## xy centres of tiles
-                                      w = diff(initial_view$extent[1:2]) / initial_view$tiles_per_side,
-                                      h = diff(initial_view$extent[3:4]) / initial_view$tiles_per_side, ## tile width and height in map coords
+                                      w = tile_w, h = tile_h, ## tile width and height in map coords
                                       res = initial_view$res))
         tile_wh <- round(image_wh / initial_view$tiles_per_side) ## in pixels
 
@@ -149,7 +157,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
 ## iOS max canvas size is 4096 x 4096, other browsers like 10k x 10k
 
         ##get_native_tile_wh <- function() {
-        ##    if (!use_fastpng) {
+        ##    if (!.use_fastpng) {
         ##        tile_wh
         ##    } else {
         ##        ## fastpng renders the images at the size of the data matrix
@@ -188,12 +196,13 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         }
 
         send_plot <- function(plot_contents, plotnum, x = 0, y = 0, w = image_wh, h = image_wh, clear = TRUE, as = "file") {
-            cat("plot", plotnum, "updated, sending to js\n")
+            cat("plot", plotnum, "updated, sending to js ")
             pxy <- isolate(calc_img_offset(image_def()))
             plotid <- paste0(id, "-plot", plotnum)
             js <- paste0("$('#", id, "-pannable').css({'left':'", pxy[1], "px', 'top':'", pxy[2], "px'}); $('#", plotid, "')")
             ## chain additional operations on that element to the end of that js
             if (as == "svg") {
+                cat("as svg\n")
                 ## plot contents is an svg string
                 ##evaljs(paste0(js, ".attr('src', 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "');"))
                 js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
@@ -204,8 +213,10 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             } else {
                 ## plot_contents is a file or raw vector
                 if (is.raw(plot_contents)) {
+                    cat("as b64 png from raw\n")
                     plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
                 } else {
+                    cat("as image from file\n")
                     plot_contents <- paste0("plots/", basename(plot_contents))
                 }
                 js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
@@ -223,7 +234,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         }
 
         extend_tiles <- function(x = 0, y = 0, z) {
-            if (clear_on_zoom) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround
+            if (.clear_on_zoom) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround
             if (missing(z)) z <- which_are_raster_layers()
             i <- image_def()
             iext <- calc_img_ext(i)
@@ -263,7 +274,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 if (type == "raster_data") {
                     dt <- vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, resample = .resampling_method, options = warp_opts)
                 } else if (type == "raster_image_rgb") {
-                    dt <- vapour::gdal_raster_data(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
+                    dt <- vapour::gdal_raster_nara(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
                 } else {
                     ## raster_image_grey
                     dt <- vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
@@ -300,7 +311,11 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 return(invisible(NULL))
             }
             rgs <- c(rgs, list(i = i, id = ids[i], key = key))
+            ## cat("fetching:\n"); cat(utils::str(rgs))
+            ## tictoc::tic()
+            ## TODO dispatch is slow, ~0.3s per call. Change this to a single mirai call that itself dispatches multiple calls?
             mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
+            ## tictoc::toc()
             if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- mid
         }
 
@@ -316,8 +331,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                     if (!mirai::unresolved(job)) {
                         result <- job$data
                         done <- c(done, ji)
-                        cat("got async data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
-                        print(names(result))
+                        cat("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
                         if (is.null(result$err)) {
                             if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
@@ -411,14 +425,15 @@ cat("--> in update_tiles_data()\n")
             cat("checking view_wh\n")
             cat("input$view_wh is:", utils::capture.output(utils::str(input$view_wh)), "\n")
             if (is.null(input$view_wh)) {
-                evaljs("Shiny.setInputValue('",id, "-view_wh', $('#", id, "').attr('data-wh'));")
-                shiny::invalidateLater(250)
+                ## needed? should be fired by the browser js when the sessioninitialized code runs
+                ## cat("triggering input$view_wh update\n")
+                ## evaljs("Shiny.setInputValue('",id, "-view_wh', $('#", id, "').attr('data-wh'));")
+                ## ## shiny::invalidateLater(250)
             } else {
                 view_wh(as.numeric(strsplit(input$view_wh, ",")[[1]]))
             }
         })
-#        observe({
-#        })
+
         init_offset <- FALSE
         observe({
             ##cat("INIT entered with", utils::capture.output(utils::str(input$window_width)), utils::capture.output(utils::str(input$window_height)), utils::capture.output(utils::str(image_def())), "\n")
@@ -468,19 +483,20 @@ cat("--> in raster layer plotter for", ii, "\n")
                         } else {
                             last_render_hash[i] <- td$data_hash
                             z <- layerdef()[[i]]$z
-                            pltf <- if (use_fastpng) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
+                            ## not clear that generating png in memory rather than disk is actually better, because the in-memory version has to be serialized to base64 and sent to the browser
+                            pltf <- if (.use_fastpng && .png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
                             ##IMSRC td$src needs to be per-tile, not per-full-image
                             ##IMSRC update tiles_data with src
                             iext <- calc_img_ext(image_def())
                             message("rendering raster plot:", pltf)
-                            ##                tictoc::tic()
-                            if (use_fastpng) {
+                            ##tictoc::tic()
+                            if (.use_fastpng) {
                                 tdim <- attr(td$data[[1]], "dimension")
                                 if (!is.null(tdim)) {
-                                    ord <- order(image_def()$xy$x, -image_def()$xy$y)
+                                    ord <- order(image_def()$xy$x, -image_def()$xy$y) ## tile ordering
                                     n <- image_def()$tiles_per_side ## image is composed of a square arrangement of tiles (which may be only one tile)
                                     if (layerdef()[[i]]$type == "raster_data") {
-                                        ## assemble tiles into single matrix
+                                        ## assemble tiles into single matrix. TODO Probably room to make this more efficient
                                         m1 <- function(z) matrix(if (is.null(z)) NA_real_ else z, nrow = tdim[2], ncol = tdim[1], byrow = TRUE) ## matrix constructor
                                         ## in what order to we need to assemble the tiles?
                                         big <- do.call(cbind, lapply(seq_len(n), function(ci) {
@@ -491,20 +507,54 @@ cat("--> in raster layer plotter for", ii, "\n")
                                         zl <- if (is.null(layerdef()[[i]]$zlims[[1]])) range(big, na.rm = TRUE) else layerdef()[[i]]$zlims[[1]]
                                         cmap <- layerdef()[[i]]$cmap[[1]]
                                         big <- pmax(pmin(round((big - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L ## scale by given zlim and then mapped to colour range, using zero-based indexing
-                                        pltf <- fastpng::write_png(big, palette = cmap, file = pltf, compression_level = 0L)
+                                        pltf <- fastpng::write_png(big, palette = cmap, file = pltf, compression_level = .png_compression_level, use_filter = .use_png_filter)
                                     } else {
                                         ## image, rgb or greyscale
                                         ## if it's greyscale we get one band back, but we assemble here into 3 bands (rgb)
                                         ## inefficient but I think fastpng requires it? (can handle 2d matrix but will scale the limits to 0-1)
                                         ## if we used gdal_raster_image fastpng::write_png(255 - aperm(array(col2rgb(td$data[[1]][[1]]), c(3, attr(td$data[[1]], "dimension"))), c(3, 2, 1)), filename = pltf, convert_to_row_major = TRUE)
-                                        a1 <- function(z) array(if (is.null(z)) NA_real_ else 256 - as.integer(unlist(z)), dim = c(tdim, 3)) ## array constructor
-                                        ## in what order to we need to assemble the array chunks?
-                                        big <- do.call(abind, c(lapply(seq_len(n), function(ci) {
-                                            do.call(abind, c(lapply((ci - 1) * n + seq_len(n), function(ri) {
-                                                aperm(a1(td$data[[ord[ri]]][1:3]), c(2, 1, 3))
-                                            }), list(along = 1)))
-                                        }), list(along = 2)))
-                                        pltf <- fastpng::write_png(big, file = pltf, compression_level = 0L)
+
+                                        ## function for constructing an array from one tile's worth of gdal data
+                                        a1 <- function(z) {
+                                            if (is.null(z)) array(NA_integer_, dim = c(tdim, 3)) else array(unlist(lapply(z, function(v) matrix(as.integer(v), byrow = 3, nrow = tdim[1]))), dim = c(tdim, 3))
+                                        }
+
+                                        ##message("assembling matrix"); tictoc::tic()
+                                        nara <- any(vapply(td$data, function(z) inherits(z[[1]], "nativeRaster"), FUN.VALUE = TRUE))
+                                        if (n == 1) {
+                                            big <- if (nara) td$data[[1]][[1]] else as.vector(matrix(unlist(td$data[[1]]), byrow = TRUE, nrow = 3))
+                                        } else {
+                                            if (nara) {
+                                                big <- nara::nr_new(tdim[1] * n, tdim[2] * n, fill = "#00000000")
+                                                xr <- range(image_def()$xy$x) + image_def()$w/2 * c(-1, 1)
+                                                yr <- range(image_def()$xy$y) + image_def()$h/2 * c(-1, 1)
+                                                toplot <- !vapply(td$data, is.null, FUN.VALUE = TRUE)
+                                                if (any(toplot)) { ## surely this has to be TRUE?
+                                                    if (TRUE) {
+                                                        ## these two implementations are similarly fast
+                                                        xpos <- sapply(td$data[toplot], function(v) (attr(v, "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n)
+                                                        ypos <- sapply(td$data[toplot], function(v) ((1 - (attr(v, "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n)
+                                                        nara::nr_blit_list(big, x = xpos, y = ypos, src_list = lapply(td$data[toplot], function(v) v[[1]]), src_idx = seq_len(sum(toplot)))
+                                                    } else {
+                                                        for (i in seq_along(td$data)) {
+                                                            if (!is.null(td$data[[i]])) {
+                                                                xpos <- (attr(td$data[[i]], "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n
+                                                                ypos <- ((1 - (attr(td$data[[i]], "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n
+                                                                nara::nr_blit(big, x = xpos, y = ypos, src = td$data[[i]][[1]])
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                big <- do.call(abind, c(lapply(seq_len(n), function(ci) { ## columns 1..n
+                                                    do.call(abind, c(lapply((ci - 1) * n + seq_len(n), ## rows
+                                                                            function(ri) a1(td$data[[ord[ri]]][1:3])), list(along = 1)))
+                                                }), list(along = 2)))
+                                            }
+                                        }
+                                        ##tictoc::toc()##; message("writing png"); tictoc::tic()
+                                        pltf <- fastpng::write_png(big, file = pltf, compression_level = .png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = .use_png_filter)
+                                        ## tictoc::toc()
                                     }
                                     ## fastpng writes the image to be sized at exactly the matrix dimensions (i.e. an 800 x 300 matrix will be 800 x 300 pixels)
                                     ## but we are displaying the image tiles in the browser at tile_wh in width and height
@@ -515,8 +565,8 @@ cat("--> in raster layer plotter for", ii, "\n")
                                     message("tdim is NULL")
                                 }
                             } else {
-                                ## TODO use unigd?
-                                png(pltf, height = image_wh, width = image_wh, res = plotres, bg = NA)
+                                ## not using fastpng. TODO use unigd?
+                                png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
                                 opar <- par(no.readonly = TRUE)
                                 par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
                                 on.exit(par(opar))
@@ -531,7 +581,7 @@ cat("--> in raster layer plotter for", ii, "\n")
                                 }
                                 dev.off()
                             }
-                            ##                tictoc::toc()
+                            ## tictoc::toc()
                             send_plot(pltf, z)
                         }
                     }
@@ -555,7 +605,7 @@ cat("--> in vector layer plotter\n")
                     pltf <- tempfile(tmpdir = tmpd, fileext = ".png")
                     ##IMSRC need to keep track of pltf for each non-raster source as well
                     if (!use_ugd) {
-                        png(pltf, height = image_wh, width = image_wh, res = plotres, bg = NA)
+                        png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
                     } else {
                         unigd::ugd(width = image_wh, height = image_wh, bg = "transparent")
                     }
@@ -642,11 +692,12 @@ cat("--> in vector layer plotter\n")
                 t$res <- t$res / zoom_by
                 t$w <- t$w / zoom_by
                 t$h <- t$h / zoom_by
+                ## ^^^ TODO align to common grid boundaries to help with caching
                 t$xy$x <- mxy[1] + t$w * image_def()$xy_grid[, 1]
                 t$xy$y <- mxy[2] + t$h * image_def()$xy_grid[, 2]
                 image_def(t)
                 viewport_ctr(mxy)
-                if (clear_on_zoom) {
+                if (.clear_on_zoom) {
                     clear_tiles_data()
                 } else {
                     ## TODO

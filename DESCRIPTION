@@ -25,6 +25,7 @@ Imports:
   leaflet,
   magrittr,
   mirai,
+  nara,
   pals,
   rlang,
   sds,
@@ -38,4 +39,4 @@ RoxygenNote: 7.3.1
 X-schema.org-applicationCategory: Antarctic/Southern Ocean
 X-schema.org-keywords: Antarctic, Southern Ocean, mapping
 X-schema.org-isPartOf: https://antarctica.gov.au, https://scar.org
-Remotes: coolbutuseless/fastpng, hypertidy/sds, hypertidy/vapour, hypertidy/ximage, nx10/unigd
+Remotes: coolbutuseless/nara, hypertidy/sds, hypertidy/vapour, hypertidy/ximage, nx10/unigd
