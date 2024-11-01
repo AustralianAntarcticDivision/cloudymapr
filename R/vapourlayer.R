@@ -104,7 +104,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
 
         .use_fastpng <- TRUE ## otherwise use png()
         .png_in_memory <- FALSE
-        .png_compression_level <- 0L ## 0L is no compression, ~0.1s to write a 2500x2500 image; 1L or 2L ~1.4s for the same image or ~0.9s with .use_png_filter = FALSE
+        .png_compression_level <- 2L ## 0L is no compression, ~0.1s to write a 2500x2500 image (25MB file); 2L ~1.4s for the same image (9.5MB) or ~0.9s with .use_png_filter = FALSE (11MB file)
         .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
         .clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible until refreshed (not quite seamless yet)
 
@@ -467,9 +467,8 @@ cat("--> in update_tiles_data()\n")
         })
 
         last_render_hash <- rep("", 9)
-##        observe({
         do_raster_plot <- function(ii = 1:9) {
-cat("--> in raster layer plotter for", ii, "\n")            
+            ## cat("--> in raster layer plotter for", ii, "\n")
 ##**            if (have_zoomed) return(NULL)
             ## plot raster-based layers
             for (i in ii) {##seq_along(layerdef())) {
@@ -483,113 +482,157 @@ cat("--> in raster layer plotter for", ii, "\n")
                         } else {
                             last_render_hash[i] <- td$data_hash
                             z <- layerdef()[[i]]$z
-                            ## not clear that generating png in memory rather than disk is actually better, because the in-memory version has to be serialized to base64 and sent to the browser
-                            pltf <- if (.use_fastpng && .png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
-                            ##IMSRC td$src needs to be per-tile, not per-full-image
-                            ##IMSRC update tiles_data with src
-                            iext <- calc_img_ext(image_def())
-                            message("rendering raster plot:", pltf)
-                            ##tictoc::tic()
-                            if (.use_fastpng) {
-                                tdim <- attr(td$data[[1]], "dimension")
-                                if (!is.null(tdim)) {
-                                    ord <- order(image_def()$xy$x, -image_def()$xy$y) ## tile ordering
-                                    n <- image_def()$tiles_per_side ## image is composed of a square arrangement of tiles (which may be only one tile)
-                                    if (layerdef()[[i]]$type == "raster_data") {
-                                        ## assemble tiles into single matrix. TODO Probably room to make this more efficient
-                                        m1 <- function(z) matrix(if (is.null(z)) NA_real_ else z, nrow = tdim[2], ncol = tdim[1], byrow = TRUE) ## matrix constructor
-                                        ## in what order to we need to assemble the tiles?
-                                        big <- do.call(cbind, lapply(seq_len(n), function(ci) {
-                                            do.call(rbind, lapply((ci - 1) * n + seq_len(n), function(ri) {
-                                                m1(td$data[[ord[ri]]][[1]])
-                                            }))
-                                        }))
-                                        zl <- if (is.null(layerdef()[[i]]$zlims[[1]])) range(big, na.rm = TRUE) else layerdef()[[i]]$zlims[[1]]
-                                        cmap <- layerdef()[[i]]$cmap[[1]]
-                                        big <- pmax(pmin(round((big - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L ## scale by given zlim and then mapped to colour range, using zero-based indexing
-                                        pltf <- fastpng::write_png(big, palette = cmap, file = pltf, compression_level = .png_compression_level, use_filter = .use_png_filter)
-                                    } else {
-                                        ## image, rgb or greyscale
-                                        ## if it's greyscale we get one band back, but we assemble here into 3 bands (rgb)
-                                        ## inefficient but I think fastpng requires it? (can handle 2d matrix but will scale the limits to 0-1)
-                                        ## if we used gdal_raster_image fastpng::write_png(255 - aperm(array(col2rgb(td$data[[1]][[1]]), c(3, attr(td$data[[1]], "dimension"))), c(3, 2, 1)), filename = pltf, convert_to_row_major = TRUE)
-
-                                        ## function for constructing an array from one tile's worth of gdal data
-                                        a1 <- function(z) {
-                                            if (is.null(z)) array(NA_integer_, dim = c(tdim, 3)) else array(unlist(lapply(z, function(v) matrix(as.integer(v), byrow = 3, nrow = tdim[1]))), dim = c(tdim, 3))
-                                        }
-
-                                        ##message("assembling matrix"); tictoc::tic()
-                                        nara <- any(vapply(td$data, function(z) inherits(z[[1]], "nativeRaster"), FUN.VALUE = TRUE))
-                                        if (n == 1) {
-                                            big <- if (nara) td$data[[1]][[1]] else as.vector(matrix(unlist(td$data[[1]]), byrow = TRUE, nrow = 3))
-                                        } else {
-                                            if (nara) {
-                                                big <- nara::nr_new(tdim[1] * n, tdim[2] * n, fill = "#00000000")
-                                                xr <- range(image_def()$xy$x) + image_def()$w/2 * c(-1, 1)
-                                                yr <- range(image_def()$xy$y) + image_def()$h/2 * c(-1, 1)
-                                                toplot <- !vapply(td$data, is.null, FUN.VALUE = TRUE)
-                                                if (any(toplot)) { ## surely this has to be TRUE?
-                                                    if (TRUE) {
-                                                        ## these two implementations are similarly fast
-                                                        xpos <- sapply(td$data[toplot], function(v) (attr(v, "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n)
-                                                        ypos <- sapply(td$data[toplot], function(v) ((1 - (attr(v, "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n)
-                                                        nara::nr_blit_list(big, x = xpos, y = ypos, src_list = lapply(td$data[toplot], function(v) v[[1]]), src_idx = seq_len(sum(toplot)))
-                                                    } else {
-                                                        for (i in seq_along(td$data)) {
-                                                            if (!is.null(td$data[[i]])) {
-                                                                xpos <- (attr(td$data[[i]], "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n
-                                                                ypos <- ((1 - (attr(td$data[[i]], "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n
-                                                                nara::nr_blit(big, x = xpos, y = ypos, src = td$data[[i]][[1]])
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                big <- do.call(abind, c(lapply(seq_len(n), function(ci) { ## columns 1..n
-                                                    do.call(abind, c(lapply((ci - 1) * n + seq_len(n), ## rows
-                                                                            function(ri) a1(td$data[[ord[ri]]][1:3])), list(along = 1)))
-                                                }), list(along = 2)))
-                                            }
-                                        }
-                                        ##tictoc::toc()##; message("writing png"); tictoc::tic()
-                                        pltf <- fastpng::write_png(big, file = pltf, compression_level = .png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = .use_png_filter)
-                                        ## tictoc::toc()
-                                    }
-                                    ## fastpng writes the image to be sized at exactly the matrix dimensions (i.e. an 800 x 300 matrix will be 800 x 300 pixels)
-                                    ## but we are displaying the image tiles in the browser at tile_wh in width and height
-                                    ## could resize: this is too slow though, just use CSS to make the browser scale it visually
-                                    ##magick::image_write(magick::image_scale(magick::image_read(pltf), paste0(tile_wh * image_def()$tiles_per_side, "x", tile_wh * image_def()$tiles_per_side)), pltf)
-                                    message("done.")
-                                } else {
-                                    message("tdim is NULL")
-                                }
-                            } else {
-                                ## not using fastpng. TODO use unigd?
-                                png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
-                                opar <- par(no.readonly = TRUE)
-                                par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
-                                on.exit(par(opar))
-                                plot(0, 0, type = "n", axes = FALSE, xlim = iext[1:2], ylim = iext[3:4])
-                                for (tl in seq_len(min(4, length(td$data)))) {
-                                    ext <- xywh_to_ext(x = image_def()$xy$x[tl], y = image_def()$xy$y[tl], w = image_def()$w, h = image_def()$h)
-                                    if (!is.null(td$data[[tl]])) {
-                                        ximage::ximage(td$data[[tl]], extent = ext, asp = 1, zlim = layerdef()[[i]]$zlims[[1]], col = layerdef()[[i]]$cmap[[1]], add = TRUE)
-                                    } else {
-                                        text(x = runif(50) * (ext[2] - ext[1]) + ext[1], y = runif(50) * (ext[4] - ext[3]) + ext[3], labels = rep("?", 50))
-                                    }
-                                }
-                                dev.off()
-                            }
-                            ## tictoc::toc()
+                            pltf <- render_to_png(td = td, image_def = image_def(), layerdef = layerdef()[[i]], image_wh = image_wh)
                             send_plot(pltf, z)
                         }
                     }
                 }
             }
-        }##)
+        }
 
-##!! need offset per layer, because in transitional phase of zoom, the raster images will be at different scale/extent to R plots
+        ## render data to png, but with caching
+        render_to_png <- function(...) {
+            keydata <- list(...)
+            keydata$td$ids <- keydata$td$xy_hash <- NULL ## don't use these for cache key calculation, those IDs will change from request to request even for the same target
+            attr(keydata$image_def$xy, "row.names") <- NULL ## the ordering of attributes "row.names" and "class" of image_def$xy changes as it gets updated, which causes the hash of otherwise-identical copies to change. Just drop the row.names attribute as a workaround
+            key <- rlang::hash(keydata)
+            if (!is.null(cache) && cache$exists(key)) {
+                message("got cached png")
+                return(cache$get(key))
+            } else {
+                pltf <- render_to_png_inner(...)
+                if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
+                pltf
+            }
+        }
+
+        render_to_png_inner <- function(td, image_def, layerdef, image_wh, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory) {
+            ## not clear that generating png in memory rather than disk is actually better, because the in-memory version has to be serialized to base64 and sent to the browser
+            pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
+            ##IMSRC td$src needs to be per-tile, not per-full-image
+            ##IMSRC update tiles_data with src
+            message("rendering raster plot:", pltf)
+            ##tictoc::tic()
+            iext <- calc_img_ext(image_def)
+            if (use_fastpng) {
+                tdim <- attr(td$data[[1]], "dimension")
+                if (!is.null(tdim)) {
+                    ord <- order(image_def$xy$x, -image_def$xy$y) ## tile ordering
+                    n <- image_def$tiles_per_side ## image is composed of a square arrangement of tiles (which may be only one tile)
+                    if (layerdef$type == "raster_data") {
+                        ## assemble tiles into single matrix. TODO Probably room to make this more efficient
+                        m1 <- function(z) matrix(if (is.null(z)) NA_real_ else z, nrow = tdim[2], ncol = tdim[1], byrow = TRUE) ## matrix constructor
+                        message("assembling data matrix"); tictoc::tic()
+                        big <- do.call(cbind, lapply(seq_len(n), function(ci) {
+                            do.call(rbind, lapply((ci - 1) * n + seq_len(n), function(ri) {
+                                m1(td$data[[ord[ri]]][[1]])
+                            }))
+                        }))
+                        zl <- if (is.null(layerdef$zlims[[1]])) range(big, na.rm = TRUE) else layerdef$zlims[[1]]
+                        cmap <- layerdef$cmap[[1]]
+                        big <- pmax(pmin(round((big - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L ## scale by given zlim and then mapped to colour range, using zero-based indexing
+                        tictoc::toc()
+                        pltf <- fastpng::write_png(big, palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
+                        ## saveRDS(td, "/tmp/td.rds")
+
+                        ## something odd with this, does not align properly with other layers
+                        ## message("assembling data matrix via nara"); tictoc::tic()
+                        ## big <- nara::nr_new(tdim[1] * n, tdim[2] * n, fill = "#00000080")
+                        ## xr <- range(image_def$xy$x) + image_def$w/2 * c(-1, 1)
+                        ## yr <- range(image_def$xy$y) + image_def$h/2 * c(-1, 1)
+                        ## #cat("xr:", str(xr))
+                        ## zl <- if (is.null(layerdef$zlims[[1]])) range(unlist(lapply(td$data, function(v) if (is.null(v[[1]])) c(NA, NA) else range(v[[1]], na.rm = TRUE))), na.rm = TRUE) else layerdef$zlims[[1]]
+                        ## #cat("zlim:", str(zl))
+                        ## cmap <- layerdef$cmap[[1]]
+                        ## for (i in seq_along(td$data)) {
+                        ##     if (!is.null(td$data[[i]])) {
+                        ##         xpos <- (attr(td$data[[i]], "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n
+                        ##         ypos <- ((1 - (attr(td$data[[i]], "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n
+                        ##         #cat("xpos:", xpos, "ypos:", ypos, "\n")
+                        ##         clamp01 <- function(z) { z[z < 0 | z > 1] <- NA; z }
+                        ##         big <- nara::nr_blit(big, x = xpos, y = ypos, src = nara::matrix_to_nr(matrix(clamp01((td$data[[i]][[1]] - zl[1]) / diff(zl)), nrow = tdim[2], ncol = tdim[1], byrow = TRUE), palette = cmap))
+                        ##     }
+                        ## }
+                        ## tictoc::toc()
+                        ## pltf <- fastpng::write_png(big, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
+                    } else {
+                        ## image, rgb or greyscale
+                        ## if it's greyscale we get one band back, but we assemble here into 3 bands (rgb)
+                        ## inefficient but I think fastpng requires it? (can handle 2d matrix but will scale the limits to 0-1)
+                        ## if we used gdal_raster_image fastpng::write_png(255 - aperm(array(col2rgb(td$data[[1]][[1]]), c(3, attr(td$data[[1]], "dimension"))), c(3, 2, 1)), filename = pltf, convert_to_row_major = TRUE)
+
+                        ## function for constructing an array from one tile's worth of gdal data
+                        a1 <- function(z) {
+                            if (is.null(z)) array(NA_integer_, dim = c(tdim, 3)) else array(unlist(lapply(z, function(v) matrix(as.integer(v), byrow = 3, nrow = tdim[1]))), dim = c(tdim, 3))
+                        }
+
+                        ##message("assembling matrix"); tictoc::tic()
+                        nara <- any(vapply(td$data, function(z) inherits(z[[1]], "nativeRaster"), FUN.VALUE = TRUE))
+                        if (n == 1) {
+                            big <- if (nara) td$data[[1]][[1]] else as.vector(matrix(unlist(td$data[[1]]), byrow = TRUE, nrow = 3))
+                        } else {
+                            if (nara) {
+                                big <- nara::nr_new(tdim[1] * n, tdim[2] * n, fill = "#00000000")
+                                xr <- range(image_def$xy$x) + image_def$w/2 * c(-1, 1)
+                                yr <- range(image_def$xy$y) + image_def$h/2 * c(-1, 1)
+                                toplot <- !vapply(td$data, is.null, FUN.VALUE = TRUE)
+                                if (any(toplot)) { ## surely this has to be TRUE, but just in case
+                                    if (TRUE) {
+                                        ## these two implementations are similarly fast
+                                        xpos <- sapply(td$data[toplot], function(v) (attr(v, "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n)
+                                        ypos <- sapply(td$data[toplot], function(v) ((1 - (attr(v, "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n)
+                                        nara::nr_blit_list(big, x = xpos, y = ypos, src_list = lapply(td$data[toplot], function(v) v[[1]]), src_idx = seq_len(sum(toplot)))
+                                    } else {
+                                        for (i in seq_along(td$data)) {
+                                            if (!is.null(td$data[[i]])) {
+                                                xpos <- (attr(td$data[[i]], "extent")[1] - xr[1]) / diff(xr) * tdim[1] * n
+                                                ypos <- ((1 - (attr(td$data[[i]], "extent")[3] - yr[1]) / diff(yr)) - 1/n) * tdim[2] * n
+                                                nara::nr_blit(big, x = xpos, y = ypos, src = td$data[[i]][[1]])
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                big <- do.call(abind, c(lapply(seq_len(n), function(ci) { ## columns 1..n
+                                    do.call(abind, c(lapply((ci - 1) * n + seq_len(n), ## rows
+                                                            function(ri) a1(td$data[[ord[ri]]][1:3])), list(along = 1)))
+                                }), list(along = 2)))
+                            }
+                        }
+                        ##tictoc::toc()##; message("writing png"); tictoc::tic()
+                        pltf <- fastpng::write_png(big, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
+                        ## tictoc::toc()
+                    }
+                    ## fastpng writes the image to be sized at exactly the matrix dimensions (i.e. an 800 x 300 matrix will be 800 x 300 pixels)
+                    ## but we are displaying the image tiles in the browser at tile_wh in width and height
+                    ## could resize: this is too slow though, just use CSS to make the browser scale it visually
+                    ##magick::image_write(magick::image_scale(magick::image_read(pltf), paste0(tile_wh * image_def()$tiles_per_side, "x", tile_wh * image_def()$tiles_per_side)), pltf)
+                    message("done.")
+                } else {
+                    message("tdim is NULL")
+                }
+            } else {
+                ## not using fastpng. TODO use unigd?
+                png(pltf, height = image_wh, width = image_wh, res = res, bg = NA)
+                opar <- par(no.readonly = TRUE)
+                par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
+                on.exit(par(opar))
+                plot(0, 0, type = "n", axes = FALSE, xlim = iext[1:2], ylim = iext[3:4])
+                for (tl in seq_len(min(4, length(td$data)))) {
+                    ext <- xywh_to_ext(x = image_def$xy$x[tl], y = image_def$xy$y[tl], w = image_def$w, h = image_def$h)
+                    if (!is.null(td$data[[tl]])) {
+                        ximage::ximage(td$data[[tl]], extent = ext, asp = 1, zlim = layerdef$zlims[[1]], col = layerdef$cmap[[1]], add = TRUE)
+                    } else {
+                        text(x = runif(50) * (ext[2] - ext[1]) + ext[1], y = runif(50) * (ext[4] - ext[3]) + ext[3], labels = rep("?", 50))
+                    }
+                }
+                dev.off()
+            }
+            ## tictoc::toc()
+            pltf
+        }
+
+        ##!! need offset per layer, because in transitional phase of zoom, the raster images will be at different scale/extent to R plots
 
         observe({
 cat("--> in vector layer plotter\n")            
