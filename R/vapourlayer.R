@@ -75,6 +75,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
     .plotres <- 96 ## dpi, only used by png graphics device
     .warp_opts <- c("-wm", "999")
     .resampling_method <- "near"
+    .debug <- 2L
     ## .resampling_method <- "bilinear" ## TODO allow this to be specified on a source-by-source basis. Be aware that bilinear sampling can cause issues when the source is raster_data and it has special values like a land mask (255) but valid values are (say) 0-100: interpolation near land will give values > 100 and < 255
 
     ## https://gdalcubes.github.io/source/concepts/config.html#recommended-settings-for-cloud-access
@@ -83,10 +84,11 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
     vapour::vapour_set_config("GDAL_CACHEMAX","30%")
     vapour::vapour_set_config("VSI_CACHE_SIZE","10000000")
     vapour::vapour_set_config("GDAL_HTTP_MULTIPLEX","YES")
-    vapour::vapour_set_config("GDAL_INGESTED_BYTES_AT_OPEN","32000")
+    vapour::vapour_set_config("GDAL_INGESTED_BYTES_AT_OPEN","128000") ## was 32k
     vapour::vapour_set_config("GDAL_HTTP_VERSION","2")
     vapour::vapour_set_config("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES","YES")
     vapour::vapour_set_config("GDAL_NUM_THREADS", "ALL_CPUS")
+    if (.debug > 1) vapour::vapour_set_config("CPL_DEBUG", "ON") else vapour::vapour_set_config("CPL_DEBUG", "OFF")
 
     moduleServer(id, function(input, output, session) {
         tmpd <- tempfile()
@@ -107,6 +109,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         .png_compression_level <- 2L ## 0L is no compression, ~0.1s to write a 2500x2500 image (25MB file); 2L ~1.4s for the same image (9.5MB) or ~0.9s with .use_png_filter = FALSE (11MB file)
         .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
         .clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible until refreshed (not quite seamless yet)
+        .use_ugd <- TRUE ## for vector layers, use unigd:ugd to generate svg
+        .clear_canvas_before_drawing <- FALSE
 
         ## generate our image_def from the user-supplied initial_view
         ## initial_view is list(tiles_per_side, extent(xmin, xmax, ymin, ymax), res)
@@ -119,6 +123,15 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         tile_w <- diff(initial_view$extent[1:2]) / initial_view$tiles_per_side
         tile_h <- diff(initial_view$extent[3:4]) / initial_view$tiles_per_side
 
+        ## we need the view to be defined such that the xy extents are multiples of the number of tiles per side
+        ## TODO or even multiples? or powers of 2?
+        if (initial_view$tiles_per_side <= 0 || (initial_view$tiles_per_side / floor(initial_view$tiles_per_side) != 1)) stop("initial_view$tiles_per_side must be an even positive integer")
+        if (initial_view$tiles_per_side > 1) {
+            if (initial_view$tiles_per_side %% 2 != 0) stop("initial_view$tiles_per_side must be 1 or an even positive integer")
+            chk <- c(tile_w, tile_h)
+            if (any(abs(chk - round(chk)) > 0)) stop("initial_view must define the xy extents to be even multiples of the number of tiles per side")
+        }
+
         ## xy centres of tiles in normalized [-1 1 -1 1] coords
         temp_xygrid <- expand.grid(x = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side,
                                    y = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side)
@@ -128,7 +141,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         image_def <- reactiveVal(list(tiles_per_side = initial_view$tiles_per_side,
                                       n_tiles = initial_view$tiles_per_side ^ 2,
                                       xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords
-                                      xy = as.data.frame(tempxy), ## xy centres of tiles
+                                      xy = as.data.frame(tempxy), ## xy centres of tiles in map coords
                                       w = tile_w, h = tile_h, ## tile width and height in map coords
                                       res = initial_view$res))
         tile_wh <- round(image_wh / initial_view$tiles_per_side) ## in pixels
@@ -195,16 +208,15 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             evaljs(paste0("$('#", id, "-pannable').css({'left':'", pxy[1], "px', 'top':'", pxy[2], "px'});", collapse = ""))
         }
 
-        send_plot <- function(plot_contents, plotnum, x = 0, y = 0, w = image_wh, h = image_wh, clear = TRUE, as = "file") {
+        layer_sources <- rep(list(list()), 9) ## so we can scale a plot and redraw its canvas when we zoom
+        send_plot <- function(plot_contents, plotnum, x = 0, y = 0, w = image_wh, h = image_wh, clear = .clear_canvas_before_drawing, as = "file") {
             cat("plot", plotnum, "updated, sending to js ")
+            layer_sources[[plotnum]] <<- list(content = plot_contents, as = as)
             pxy <- isolate(calc_img_offset(image_def()))
             plotid <- paste0(id, "-plot", plotnum)
-            js <- paste0("$('#", id, "-pannable').css({'left':'", pxy[1], "px', 'top':'", pxy[2], "px'}); $('#", plotid, "')")
-            ## chain additional operations on that element to the end of that js
             if (as == "svg") {
                 cat("as svg\n")
                 ## plot contents is an svg string
-                ##evaljs(paste0(js, ".attr('src', 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "');"))
                 js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
                   "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                   if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
@@ -230,13 +242,15 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         clear_plot <- function(plotnum) {
             ## can be multiple plotnums
             cat("clearing plot", plotnum, "\n")
+            layer_sources[[plotnum]] <<- list()
             evaljs("var this_ctx;", paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "'); if (this_ctx) { this_ctx.getContext('2d').clearRect(0, 0, 3200, 3200); }", collapse = ""))
         }
 
         extend_tiles <- function(x = 0, y = 0, z) {
-            if (.clear_on_zoom) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround
+            if (.debug > 1) cat("--> in extend_tiles()\n")
+            if (.clear_on_zoom) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround TODO check and fix
             if (missing(z)) z <- which_are_raster_layers()
-            i <- image_def()
+            i0 <- i <- image_def()
             iext <- calc_img_ext(i)
             if (x < 0) {
                 i$xy$x <- i$xy$x - diff(iext[1:2]) / 2
@@ -249,10 +263,11 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 i$xy$y <- i$xy$y + diff(iext[3:4]) / 2
             }
             image_def(i) ## update the image reactive
-            for (zz in z) {
-                cat("updating tiles data for layer:", zz, "\n")
-                update_tiles_data(i, zz) ## request the corresponding data
-            }
+            ## don't think this is needed, because the "generic" update_tiles_data observer should catch the change to image_def
+            ## for (zz in z) {
+            ##     cat("updating tiles data for layer:", zz, "\n")
+            ##     update_tiles_data(i, zz) ## request the corresponding data
+            ## }
         }
 
         clear_tiles_data <- function(z = 1:9) {
@@ -310,20 +325,27 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 handle_tile_data(result)
                 return(invisible(NULL))
             }
-            rgs <- c(rgs, list(i = i, id = ids[i], key = key))
-            ## cat("fetching:\n"); cat(utils::str(rgs))
-            ## tictoc::tic()
-            ## TODO dispatch is slow, ~0.3s per call. Change this to a single mirai call that itself dispatches multiple calls?
-            mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
-            ## tictoc::toc()
-            if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- mid
+            ## if a fetch request is already happening with this key, don't re-issue a new fetch request
+            if (key %in% sapply(mirai_queue, function(job) job$key)) {
+                ## cat("request with key", key, "is already in the queue, not re-queueing\n")
+            } else {
+                rgs <- c(rgs, list(i = i, id = ids[i], key = key))
+                ## cat("fetching:\n"); cat(utils::str(rgs))
+                ## tictoc::tic()
+                ## TODO dispatch is slow, ~0.3s per call. Change this to a single mirai call that itself dispatches multiple calls?
+      cat("fetch args:\n")
+      cat(str(rgs))
+                mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
+                ## tictoc::toc()
+                if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
+            }
         }
 
         ## poll the mirai results. Can this be replaced with a shiny::ExtendedTask approach?
         observe({
             done <- c()
             for (ji in seq_along(mirai_queue)) {
-                job <- mirai_queue[[ji]]
+                job <- mirai_queue[[ji]]$mid
                 if (!inherits(job, "mirai")) {
                     cat("job on queue is not a mirai job:"); cat(utils::str(job))
                     done <- c(done, ji)
@@ -353,10 +375,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             }
         })
 
-        have_zoomed <- FALSE
         update_tiles_data <- function(t, z = 1) {
 cat("--> in update_tiles_data()\n")            
-##**            if (have_zoomed) return(NULL)
             ## cat("updating tiles data for z =", utils::capture.output(utils::str(z)), "\n")
             ## t here is image_def()
             xy_hash <- digest::digest(list(t, layerdef()[[z]]))
@@ -469,7 +489,6 @@ cat("--> in update_tiles_data()\n")
         last_render_hash <- rep("", 9)
         do_raster_plot <- function(ii = 1:9) {
             ## cat("--> in raster layer plotter for", ii, "\n")
-##**            if (have_zoomed) return(NULL)
             ## plot raster-based layers
             for (i in ii) {##seq_along(layerdef())) {
                 if (is_raster_layer(i)) {
@@ -477,7 +496,7 @@ cat("--> in update_tiles_data()\n")
                     td0 <- isolate(tiles_data())
                     td <- td0[[i]]$img
                     if (!is.null(td)) {
-                        if (identical(last_render_hash[i], td$data_hash)) {
+                        if (!is.na(last_render_hash[i]) && identical(last_render_hash[i], td$data_hash)) {
                             cat("layer i data hash unchanged, not re-rendering\n")
                         } else {
                             last_render_hash[i] <- td$data_hash
@@ -515,7 +534,8 @@ cat("--> in update_tiles_data()\n")
             ##tictoc::tic()
             iext <- calc_img_ext(image_def)
             if (use_fastpng) {
-                tdim <- attr(td$data[[1]], "dimension")
+                tdim <- Filter(Negate(is.null), lapply(td$data, attr, "dimension"))
+                tdim <- if (length(tdim) > 0) tdim[[1]] else NULL
                 if (!is.null(tdim)) {
                     ord <- order(image_def$xy$x, -image_def$xy$y) ## tile ordering
                     n <- image_def$tiles_per_side ## image is composed of a square arrangement of tiles (which may be only one tile)
@@ -599,9 +619,9 @@ cat("--> in update_tiles_data()\n")
                                 }), list(along = 2)))
                             }
                         }
-                        ##tictoc::toc()##; message("writing png"); tictoc::tic()
+                        if (.debug > 1) temp <- proc.time()["elapsed"]
                         pltf <- fastpng::write_png(big, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
-                        ## tictoc::toc()
+                        if (.debug > 1) message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!.png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
                     }
                     ## fastpng writes the image to be sized at exactly the matrix dimensions (i.e. an 800 x 300 matrix will be 800 x 300 pixels)
                     ## but we are displaying the image tiles in the browser at tile_wh in width and height
@@ -636,40 +656,44 @@ cat("--> in update_tiles_data()\n")
 
         observe({
 cat("--> in vector layer plotter\n")            
-##**            if (have_zoomed) return(NULL)
             ## deal with non-raster layers for which the user has provided a plot function
             iext <- calc_img_ext(image_def())
-            use_ugd <- TRUE
-            for (i in seq_along(layerdef())) {
-                if (!is.null(layerdef()[[i]]) && "fun" %in% names(layerdef()[[i]])) {
-                    z <- layerdef()[[i]]$z
-                    cat("rendering plot", i, "layer", z, " as", if (use_ugd) "svg\n" else "png\n")
-                    ##tictoc::tic()
-                    pltf <- tempfile(tmpdir = tmpd, fileext = ".png")
-                    ##IMSRC need to keep track of pltf for each non-raster source as well
-                    if (!use_ugd) {
-                        png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
-                    } else {
-                        unigd::ugd(width = image_wh, height = image_wh, bg = "transparent")
-                    }
-                    opar <- par(no.readonly = TRUE)
-                    par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
-                    ok <- layerdef()[[i]]$fun(xlim = iext[1:2], ylim = iext[3:4])
-                    if (ok && use_ugd) {
-                        pltf <- unigd::ugd_render(as = "svg")
-                        pltf <- sub("<rect width=\"100%\" height=\"100%\" style=\"stroke: none;fill: #FFFFFF;\"/>", "", pltf, fixed = TRUE)
-                    }
-                    par(opar)
-                    dev.off()
-                    ##tictoc::toc()
-                    if (use_ugd) {
-                        if (ok) send_plot(pltf, z, as = "svg") else clear_plot(z)
-                    } else {
-                        if (ok) send_plot(pltf, z) else clear_plot(z)
-                    }
+            for (i in seq_along(layerdef())) do_vector_plot(i, iext)
+        }, priority = 9)
+
+        do_vector_plot <- function(i, iext, and_stop = FALSE) {
+            ld <- isolate(layerdef())
+            if (missing(iext)) iext <- calc_img_ext(image_def())
+            if (and_stop) browser()
+            if (!is.null(ld[[i]]) && "fun" %in% names(ld[[i]])) {
+                z <- ld[[i]]$z
+                cat("rendering plot", i, "layer", z, " as", if (.use_ugd) "svg\n" else "png\n")
+                ##tictoc::tic()
+                pltf <- tempfile(tmpdir = tmpd, fileext = ".png")
+                ##IMSRC need to keep track of pltf for each non-raster source as well
+                if (!.use_ugd) {
+                    png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
+                } else {
+                    unigd::ugd(width = image_wh, height = image_wh, bg = "transparent")
+                }
+                opar <- par(no.readonly = TRUE)
+                par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
+                ok <- ld[[i]]$fun(xlim = iext[1:2], ylim = iext[3:4])
+                if (ok && .use_ugd) {
+                    pltf <- unigd::ugd_render(as = "svg")
+                    pltf <- sub("<rect width=\"100%\" height=\"100%\" style=\"stroke: none;fill: #FFFFFF;\"/>", "", pltf, fixed = TRUE)
+                }
+                par(opar)
+                dev.off()
+                ##tictoc::toc()
+                if (.use_ugd) {
+                    if (ok) send_plot(pltf, z, as = "svg") else clear_plot(z)
+                } else {
+                    if (ok) send_plot(pltf, z) else clear_plot(z)
                 }
             }
-        }, priority = 9)
+        }
+
 
         mapclick <- reactiveVal(NULL)
         observeEvent(input$mapclick, {
@@ -743,23 +767,44 @@ cat("--> in vector layer plotter\n")
                 if (.clear_on_zoom) {
                     clear_tiles_data()
                 } else {
-                    ## TODO
-                    ## initially just rescale the images so we are showing the lower-res (when zooming in) detail while the higher res loads
-                    ##IMSRC need current source for each layer so can re-send at different offset and wh
-                    ## all layers
-                    io <- {
-                        vps_mu <- vps_mu / zoom_by ## viewport size in map units after zooming
-                        vp_lt <- c(mxy[1] - vps_mu[1] / 2, mxy[2] + vps_mu[2] / 2) ## top-left of viewport after zooming
-                        iext <- calc_img_ext(t0)
-                        io_mu <- c(-1, 1) * (vp_lt - iext[c(1, 4)]) ## image offset in map units
-                        c(io_mu[1] / t0$w * tile_wh * zoom_by, io_mu[2] / t0$h * tile_wh * zoom_by)
+                    ## redraw each image at scaled size and adjusted offset
+                    resend_plot <- function(plotnum, zoomf, clear = .clear_canvas_before_drawing) {
+                        if (length(layer_sources[[plotnum]]) > 0) {
+                            plotid <- paste0(id, "-plot", plotnum)
+                            as <- layer_sources[[plotnum]]$as
+                            plot_contents <- layer_sources[[plotnum]]$content
+                            zwh <- image_wh * zoomf ## the new width and height
+                            ## the current viewport centre in pixels
+                            js <- paste0("var thisL = -parseInt($('#", id, "-pannable').css('left')); var thisT = -parseInt($('#", id, "-pannable').css('top')); ")
+                            ## required x offset when drawing the scaled image is -L - (viewport width in pixels)/zoomf
+                            vwoff <- get_viewport_size() / zoomf
+                            if (as == "svg") {
+                                cat("as svg\n")
+                                ## plot contents is an svg string
+                                js <- paste0(js, "var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                                             "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
+                                             if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
+                                             "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, -thisL-", vwoff[1], ", -thisT-", vwoff[2], ", ", zwh, ", ", zwh, "); }; image_", id, "_", plotnum, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
+                                evaljs(js)
+                            } else {
+                                ## plot_contents is a file or raw vector
+                                if (is.raw(plot_contents)) {
+                                    cat("as b64 png from raw\n")
+                                    plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
+                                } else {
+                                    cat("as image from file\n")
+                                    plot_contents <- paste0("plots/", basename(plot_contents))
+                                }
+                                js <- paste0(js, "var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                                             "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
+                                             if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
+                                             "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, -thisL-", vwoff[1], ", -thisT-", vwoff[2], ", ", zwh, ", ", zwh, "); }; image_", id, "_", plotnum, ".src = '", plot_contents, "';")
+                                evaljs(js)
+                            }
+                        }
                     }
-                    ## TODO these in one step per layer
-                    set_pan(io) ## set pan at the temporarily rescaled size
-                    cat("--> zoom-resizing the visible image of all layers\n")
-                    for (z in 1:9) evaljs("$('#", id, "-plot", z, "').width('", image_wh * zoom_by, "px').height('", image_wh * zoom_by, "px');")
+                    for (z in 1:9) resend_plot(plotnum = z, zoomf = zoom_by)
                 }
-                have_zoomed <<- TRUE
                 cat("out zoom\n")
             }
             ##Z if (zoom() >= zoom_range[2]) js_add_class(paste0(id, "-zoom-in-icon"), "icon-disabled") else js_remove_class(paste0(id, "-zoom-in-icon"), "icon-disabled")
