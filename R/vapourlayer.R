@@ -9,8 +9,6 @@
 #' * tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles
 #' * extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
 #' * res numeric: the resolution (in m) to use for the image when shown at its intial extent
-# @param initial_zoom integer: initial zoom level
-# @param zoom_range integer: two-element integer vector giving the minimum and maximum zoom levels
 #' @param layerdef reactive: TBD
 #' @param target_crs string: target projection CRS string
 #' @param cache logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a `cachem` object (as returned by e.g. [cachem::cache_mem()])
@@ -35,8 +33,8 @@ vl_map_ui <- function(id, view_wh = c(40, 40)) {
                                              Pannable(document.querySelector('#", id, "'));
                                              Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth);
                                              Shiny.setInputValue('", id, "-view_wh', '", paste0(view_wh, collapse = ","), "');
-                                             $('#", id, "-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', 1, { priority: 'event' }); });
-                                             $('#", id, "-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', -1, { priority: 'event' }); });
+                                             $('#", id, "-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [1, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
+                                             $('#", id, "-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [-1, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
                                              var ", id, "_br_rsztmr;
                                              $(window).resize(function() {
                                                clearTimeout(", id, "_br_rsztmr);
@@ -71,7 +69,7 @@ vl_map_ui_postamble <- function() {
 
 #' @export
 #' @rdname vl_map_module
-vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2e7, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) { ##Z initial_zoom = 1, zoom_range = c(0, 6),
+vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2e7, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) {
     .plotres <- 96 ## dpi, only used by png graphics device
     .warp_opts <- c("-wm", "999")
     .resampling_method <- "near"
@@ -108,7 +106,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         .png_in_memory <- FALSE
         .png_compression_level <- 2L ## 0L is no compression, ~0.1s to write a 2500x2500 image (25MB file); 2L ~1.4s for the same image (9.5MB) or ~0.9s with .use_png_filter = FALSE (11MB file)
         .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
-        .clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible until refreshed (not quite seamless yet)
+        .clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible while refreshing?
         .use_ugd <- TRUE ## for vector layers, use unigd:ugd to generate svg
         .clear_canvas_before_drawing <- FALSE
 
@@ -187,17 +185,16 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 c(NA_real_, NA_real_)
             })
         }
-        mu_to_pixels <- function(mu) {
-            img <- isolate(image_def())
+        mu_to_pixels <- function(mu, idef) {
+            if (missing(idef)) idef <- isolate(image_def())
             tryCatch({
-                round(c(mu[1] / img$w * tile_wh, mu[2] / img$h * tile_wh)) ## integer pixels only
+                round(c(mu[1] / idef$w * tile_wh, mu[2] / idef$h * tile_wh)) ## integer pixels only
             }, error = function(e) {
                 warning("mu_to_pixels failed: ", conditionMessage(e))
                 c(NA_integer_, NA_integer_)
             })
         }
 
-        ##Z zoom <- reactiveVal(initial_zoom) ## initial
         check_extent_trigger <- reactiveVal(0L)
         tiles_data <- reactiveVal(rep(list(list(img = NULL)), 9))
 
@@ -208,11 +205,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             evaljs(paste0("$('#", id, "-pannable').css({'left':'", pxy[1], "px', 'top':'", pxy[2], "px'});", collapse = ""))
         }
 
-        layer_sources <- rep(list(list()), 9) ## so we can scale a plot and redraw its canvas when we zoom
         send_plot <- function(plot_contents, plotnum, x = 0, y = 0, w = image_wh, h = image_wh, clear = .clear_canvas_before_drawing, as = "file") {
             cat("plot", plotnum, "updated, sending to js ")
-            layer_sources[[plotnum]] <<- list(content = plot_contents, as = as)
-            pxy <- isolate(calc_img_offset(image_def()))
             plotid <- paste0(id, "-plot", plotnum)
             if (as == "svg") {
                 cat("as svg\n")
@@ -242,7 +236,6 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         clear_plot <- function(plotnum) {
             ## can be multiple plotnums
             cat("clearing plot", plotnum, "\n")
-            layer_sources[[plotnum]] <<- list()
             evaljs("var this_ctx;", paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "'); if (this_ctx) { this_ctx.getContext('2d').clearRect(0, 0, 3200, 3200); }", collapse = ""))
         }
 
@@ -283,6 +276,9 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         which_are_raster_layers <- function() {
             isolate(which(vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
         }
+        which_are_vector_layers <- function() {
+            isolate(which(!vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
+        }
 
         fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, ...) {
             tryCatch({
@@ -302,11 +298,12 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             td <- isolate(tiles_data())
             td2 <- td[[result$z]]
             if (result$id %in% td2$img$ids) {
-                td2$img$data[[which(result$id == td2$img$ids)]] <- result$data
+                i <- which(result$id == td2$img$ids)
+                td2$img$data[[i]] <- result$data
                 td2$img$data_hash <- digest::digest(td2$img$data)
                 td[[result$z]] <- td2
                 tiles_data(td)
-                raster_plot_trigger(list(isolate(raster_plot_trigger())[[1]] + 1L, result$z))
+                isolate(draw_tile(z = result$z, td = td2, i = i, image_def = image_def(), layerdef = layerdef()))
             }
         }
 
@@ -367,13 +364,13 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             shiny::invalidateLater(100)
         })
 
-        raster_plot_trigger <- reactiveVal(list(0L, NULL))
-        observeEvent(raster_plot_trigger(), {
-            if (!is.null(raster_plot_trigger()[[2]])) {
-                cat("--> raster_plot_trigger changed for plot:", raster_plot_trigger()[[2]], "\n")
-                do_raster_plot(raster_plot_trigger()[[2]])
-            }
-        })
+        ## raster_plot_trigger <- reactiveVal(list(0L, NULL))
+        ## observeEvent(raster_plot_trigger(), {
+        ##     if (!is.null(raster_plot_trigger()[[2]])) {
+        ##         cat("--> raster_plot_trigger changed for plot:", raster_plot_trigger()[[2]], "\n")
+        ##         do_raster_plot(raster_plot_trigger()[[2]])
+        ##     }
+        ## })
 
         update_tiles_data <- function(t, z = 1) {
 cat("--> in update_tiles_data()\n")            
@@ -409,7 +406,8 @@ cat("--> in update_tiles_data()\n")
         ## do the initial data load
         ##init_loaded <- FALSE
         observe({
-            req(layerdef(), view_wh())
+            req(layerdef(), view_wh(), image_def())
+            cat("triggering generic update_tiles_data() because image_def(), layerdef(), or view_wh() has changed\n")
             for (z in which_are_raster_layers()) update_tiles_data(image_def(), z)
         })
 
@@ -435,6 +433,8 @@ cat("--> in update_tiles_data()\n")
                 init0 <<- TRUE
                 ## INIT evaljs("$('#", id, "').width('", view_wh[1], "vw').height('", view_wh[2], "vh');")
                 evaljs("$('#", id, "-pannable').width('", image_wh, "px').height('", image_wh, "px');")
+                ## set the canvas sizes
+                evaljs(paste(sapply(1:9, function(plotnum) paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "').getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";")), collapse = ""))
                 ## TODO store array of contexts - but discard the pair plots idea first if possible
 ##?!?                evaljs("var this_ctx;")
 ##?!?                for (plotnum in 1:9) evaljs(paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "').getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";", collapse = ""))
@@ -509,6 +509,103 @@ cat("--> in update_tiles_data()\n")
             }
         }
 
+        draw_tile <- function(z, td, i, image_def, layerdef, clear = TRUE, as = "file") {
+            ## z is the layer index (e.g. into tiles_data()
+            ## td is that tiles_data() entry
+            ## i is the index within the layer (> 1 if we have multiple tiles per side)
+            ## send tile to canvas
+            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]]) ## figure out for zoomed, if tiles_data has been updated and the data is NULL, this will not get the cached image, it'll fail
+            if (!is.null(plot_contents)) {
+                iext_mu <- calc_img_ext(image_def) ## full canvas extent in map units, e.g. [-2 2 -2 2]e7
+                ## the normalized x and y extents of this tile in that canvas extent
+                xn <- (attr(td$img$data[[i]], "extent")[1:2] - iext_mu[1]) / diff(iext_mu[1:2])
+                yn <- 1 - (attr(td$img$data[[i]], "extent")[3:4] - iext_mu[3]) / diff(iext_mu[3:4]) ## 1 - because we draw from top
+                ## and thus the region in pixels in the canvas for this tile
+                tlp <- c(xn[1], yn[2]) * image_wh
+                brp <- c(xn[2], yn[1]) * image_wh
+
+                ## top-left/bottom-right (in pixels) of this tile in the image, remembering that the canvas origin (0, 0) is top-left
+                                        #            tlp <- (image_def$xy_grid[i, ] + 1)/2 + 1/image_def$tiles_per_side/2 * c(-1, 1); tlp[2] <- 1 - tlp[2]; tlp <- tlp * image_wh
+                                        #            brp <- (image_def$xy_grid[i, ] + 1)/2 + 1/image_def$tiles_per_side/2 * c(1, -1); brp[2] <- 1 - brp[2]; brp <- brp * image_wh
+
+                cat("sending tile to js ")
+                plotid <- paste0(id, "-plot", z)
+                if (as == "svg") {
+                    cat("as svg\n")
+                    ## plot contents is an svg string
+                    js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                                 ##"this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
+                                 if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], ");"),
+                                 "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], "); }; image_", id, "_", z, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
+                    evaljs(js)
+                                        #                readline("enter to continue")
+                } else {
+                    ## plot_contents is a file or raw vector
+                    if (is.raw(plot_contents)) {
+                        cat("as b64 png from raw\n")
+                        plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
+                    } else {
+                        cat("as image from file\n")
+                        plot_contents <- paste0("plots/", basename(plot_contents))
+                    }
+                    js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                                 ##"this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
+                                 if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");"),
+                                 "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), "); }; image_", id, "_", z, ".src = '", plot_contents, "';")
+
+                    ## plotid <- paste0(id, "-plot", z); plot_contents <- paste0("plots/", basename(plot_contents))
+                    ## js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');", "this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");", "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), "); }; image_", id, "_", z, ".src = '", plot_contents, "';"); evaljs(js)
+
+                    evaljs(js)
+                }
+            }
+            set_pan()
+#            readline("enter to continue")
+        }
+            
+        
+        ## render data to png, but with caching
+        tile_to_png <- function(...) {
+            keydata <- list(...)
+            if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
+            keydata$td <- keydata$td$img$data[[keydata$i]] ## don't use other bits for cache key calculation
+            key <- rlang::hash(keydata)
+            cat("key:", key, "\n")
+            cat(str(keydata))
+            if (!is.null(cache) && cache$exists(key)) {
+                message("got cached png")
+                return(cache$get(key))
+            } else {
+                pltf <- tile_to_png_inner(...)
+                if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
+                pltf
+            }
+        }
+
+        tile_to_png_inner <- function(td, i, layerdef, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory) {
+            if (is.null(td$img$data[[i]][[1]])) return(NULL)
+            pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
+            message("rendering raster tile to png:", pltf)
+            if (use_fastpng) {
+                if (layerdef$type == "raster_data") {
+                    zl <- if (is.null(layerdef$zlims[[1]])) stop("need z limits") else layerdef$zlims[[1]]
+                    cmap <- layerdef$cmap[[1]]
+                    pltf <- fastpng::write_png(td$img$data[[i]][[1]], palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
+                } else {
+                    ## image, rgb or greyscale
+                    nara <- inherits(td$img$data[[i]][[1]], "nativeRaster")
+                    dat <- if (nara) td$img$data[[i]][[1]] else as.vector(matrix(unlist(td$img$data[[i]][[1]]), byrow = TRUE, nrow = 3))
+                    if (.debug > 1) temp <- proc.time()["elapsed"]
+                    tdim <- attr(td$img$data[[i]], "dimension")
+                    pltf <- fastpng::write_png(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
+                    if (.debug > 1) message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!.png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
+                }
+            } else {
+                stop("not coded")
+            }
+            pltf
+        }
+
         ## render data to png, but with caching
         render_to_png <- function(...) {
             keydata <- list(...)
@@ -532,7 +629,6 @@ cat("--> in update_tiles_data()\n")
             ##IMSRC update tiles_data with src
             message("rendering raster plot:", pltf)
             ##tictoc::tic()
-            iext <- calc_img_ext(image_def)
             if (use_fastpng) {
                 tdim <- Filter(Negate(is.null), lapply(td$data, attr, "dimension"))
                 tdim <- if (length(tdim) > 0) tdim[[1]] else NULL
@@ -637,6 +733,7 @@ cat("--> in update_tiles_data()\n")
                 opar <- par(no.readonly = TRUE)
                 par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
                 on.exit(par(opar))
+                iext <- calc_img_ext(image_def)
                 plot(0, 0, type = "n", axes = FALSE, xlim = iext[1:2], ylim = iext[3:4])
                 for (tl in seq_len(min(4, length(td$data)))) {
                     ext <- xywh_to_ext(x = image_def$xy$x[tl], y = image_def$xy$y[tl], w = image_def$w, h = image_def$h)
@@ -652,10 +749,9 @@ cat("--> in update_tiles_data()\n")
             pltf
         }
 
-        ##!! need offset per layer, because in transitional phase of zoom, the raster images will be at different scale/extent to R plots
-
         observe({
-cat("--> in vector layer plotter\n")            
+            req(image_def())
+cat("--> in vector layer plotter\n")
             ## deal with non-raster layers for which the user has provided a plot function
             iext <- calc_img_ext(image_def())
             for (i in seq_along(layerdef())) do_vector_plot(i, iext)
@@ -720,7 +816,7 @@ cat("--> in vector layer plotter\n")
                 ## convert to map units
                 mxy <- c(pixels_to_mu(mxy[c(1, 3)]), pixels_to_mu(mxy[c(2, 4)]))[c(1, 3, 2, 4)] ## TODO fix this nonsense
                 mxy <- mxy + viewport_ctr()[c(1, 1, 2, 2)]
-                ##cat("select mu:", mxy, "\n") ## [xmin xmax ymin ymax] in pixels relative to viewport; (0, 0) is bottom-left
+                cat("select mu:", mxy, "\n") ## [xmin xmax ymin ymax] of selected area in (absolute) map units
                 vps_mu <- pixels_to_mu(get_viewport_size()) ## viewport size in map units
                 zoomf <- min(vps_mu[1] / abs(diff(mxy[c(1, 2)])), vps_mu[2] / abs(diff(mxy[c(3, 4)])))
                 zoomc <- c((mxy[1] + mxy[2]) / 2, (mxy[3] + mxy[4]) / 2)
@@ -731,84 +827,100 @@ cat("--> in vector layer plotter\n")
 
         observeEvent(input$do_zoom, {
             req(input$do_zoom)
-            cat("zoom:", input$do_zoom, "\n")
-            do_zoom(in_out = input$do_zoom)
+            cat("zoom:", utils::capture.output(utils::str(input$do_zoom)), "\n")
+            ## pressing the zoom in/out buttons will give a vector with [zoom_direction left_offset top_offset] where the offsets are the current css offsets of the viewport in pixels
+            ## and so (left_offset + viewport_width/2, top_offset + viewport_height/2) is the viewport-centre-pixel of the unzoomed image (also of the canvas), from which we can calculate the map coords on which to centre the zoom mxy with e.g.
+            ## mxy <- calc_img_ext(image_def())[c(1, 4)] + c(1, -1) * pixels_to_mu(input$do_zoom[2:3] + get_viewport_size() / 2)
+            ## BUT mxy should be the same as viewport_ctr(), and mxy seems to suffer from pixel-rounding errors, so use viewport_ctr() at least for now
+            do_zoom(in_out = input$do_zoom[1])
         })
 
         do_zoom <- function(mxy, in_out, zoom_by) {
+            ## mxy is the point on which to centre the zoom, in map units
             if (missing(mxy)) mxy <- isolate(viewport_ctr())
             cat("do_zoom, ctr: ", mxy, "\n")
             ## mxy is map units of centre point of zoom
             ## in_out is 1 for in, -1 for out, or specify zoom_by (zoom factor)
             if (missing(in_out)) in_out <- (zoom_by > 1) * 2L - 1L
             if (missing(zoom_by)) zoom_by <- NA
-            ## TODO zoom() and zoom_range don't make sense if we are allowing zoom by arbitrary rectangle
-            ## but we do need a zoom-out limit, probably
-            if (TRUE) {##Z ((in_out > 0 && zoom() < zoom_range[2]) || (in_out < 0 && zoom() > zoom_range[1])) {
-                if (in_out > 0) {
-                    if (is.na(zoom_by)) zoom_by <- 2
-                    ##Z zoom(zoom() + 1L)
-                } else {
-                    if (is.na(zoom_by)) zoom_by <- 1/2
-                    ##Z zoom(zoom() - 1L)
-                }
-                ## some things before zooming
-                vps_mu <- pixels_to_mu(get_viewport_size()) ## current viewport size in map units
-                ## update the tile centres, width, height
-                t0 <- t <- image_def()
-                t$res <- t$res / zoom_by
-                t$w <- t$w / zoom_by
-                t$h <- t$h / zoom_by
-                ## ^^^ TODO align to common grid boundaries to help with caching
-                t$xy$x <- mxy[1] + t$w * image_def()$xy_grid[, 1]
-                t$xy$y <- mxy[2] + t$h * image_def()$xy_grid[, 2]
-                image_def(t)
-                viewport_ctr(mxy)
-                if (.clear_on_zoom) {
-                    clear_tiles_data()
-                } else {
-                    ## redraw each image at scaled size and adjusted offset
-                    resend_plot <- function(plotnum, zoomf, clear = .clear_canvas_before_drawing) {
-                        if (length(layer_sources[[plotnum]]) > 0) {
-                            plotid <- paste0(id, "-plot", plotnum)
-                            as <- layer_sources[[plotnum]]$as
-                            plot_contents <- layer_sources[[plotnum]]$content
-                            zwh <- image_wh * zoomf ## the new width and height
-                            ## the current viewport centre in pixels
-                            js <- paste0("var thisL = -parseInt($('#", id, "-pannable').css('left')); var thisT = -parseInt($('#", id, "-pannable').css('top')); ")
-                            ## required x offset when drawing the scaled image is -L - (viewport width in pixels)/zoomf
-                            vwoff <- get_viewport_size() / zoomf
-                            if (as == "svg") {
-                                cat("as svg\n")
-                                ## plot contents is an svg string
-                                js <- paste0(js, "var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
-                                             "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
-                                             if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
-                                             "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, -thisL-", vwoff[1], ", -thisT-", vwoff[2], ", ", zwh, ", ", zwh, "); }; image_", id, "_", plotnum, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
-                                evaljs(js)
-                            } else {
-                                ## plot_contents is a file or raw vector
-                                if (is.raw(plot_contents)) {
-                                    cat("as b64 png from raw\n")
-                                    plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
-                                } else {
-                                    cat("as image from file\n")
-                                    plot_contents <- paste0("plots/", basename(plot_contents))
-                                }
-                                js <- paste0(js, "var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
-                                             "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
-                                             if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
-                                             "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, -thisL-", vwoff[1], ", -thisT-", vwoff[2], ", ", zwh, ", ", zwh, "); }; image_", id, "_", plotnum, ".src = '", plot_contents, "';")
-                                evaljs(js)
-                            }
-                        }
-                    }
-                    for (z in 1:9) resend_plot(plotnum = z, zoomf = zoom_by)
-                }
-                cat("out zoom\n")
+            ## TODO we might need a zoom-out limit?
+            if (in_out > 0) {
+                if (is.na(zoom_by)) zoom_by <- 2
+            } else {
+                if (is.na(zoom_by)) zoom_by <- 1/2
             }
-            ##Z if (zoom() >= zoom_range[2]) js_add_class(paste0(id, "-zoom-in-icon"), "icon-disabled") else js_remove_class(paste0(id, "-zoom-in-icon"), "icon-disabled")
-            ##Z if (zoom() <= zoom_range[1]) js_add_class(paste0(id, "-zoom-out-icon"), "icon-disabled") else js_remove_class(paste0(id, "-zoom-out-icon"), "icon-disabled")
+            ## some things before zooming
+            vps_mu <- pixels_to_mu(get_viewport_size()) ## current viewport size in map units
+            ## update the tile centres, width, height
+            idef0 <- idef <- image_def()
+            tiles_data_before_zoom <- isolate(tiles_data())
+            idef$res <- idef$res / zoom_by
+            idef$w <- idef$w / zoom_by
+            idef$h <- idef$h / zoom_by
+##                 ## ^^^ TODO align to common grid boundaries to help with caching
+##                 ## we will always align our tiles so that they align with (x) initial_view$extent[1] + N * CURRENT_tile_w and (y) initial_view$extent[3] + M * CURRENT_tile_h
+##                 ## so N = (newx0 - initial_view$extent[1])/CURRENT_tile_w
+##                 newx0 <- mxy[1] - idef$w / 2
+##                 N <- round((newx0 - initial_view$extent[1])/idef$w)
+##                 initial_view$extent[1] + N * idef$w
+##                 newx0 <- min(idef0$xy$x) - idef0$w/2
+## #N * current_tile_w + initial_view$extent[1]
+## browser()
+                
+        ##view_ref <- list(x0 = initial_view$extent[1], y0 = initial_view$extent[3], 
+#        image_def <- reactiveVal(list(tiles_per_side = initial_view$tiles_per_side,
+#                                      n_tiles = initial_view$tiles_per_side ^ 2,
+#                                      xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords
+#                                      xy = as.data.frame(tempxy), ## xy centres of tiles in map coords
+#                                      w = tile_w, h = tile_h, ## tile width and height in map coords
+#                                      res = initial_view$res))
+
+                ## mxy is where the zoomed view should be centred, but not necessarily the centre of the zoomed image extents
+                
+            idef$xy$x <- mxy[1] + idef$w * image_def()$xy_grid[, 1]
+            idef$xy$y <- mxy[2] + idef$h * image_def()$xy_grid[, 2]
+            image_def(idef)
+            viewport_ctr(mxy)
+            resend_tiles <- function(plotnum, tiles_data, zoomf, clear = .clear_canvas_before_drawing) {
+                if (length(layerdef()[[plotnum]]) > 0) {
+                    for (i in seq_along(tiles_data[[plotnum]]$img$data)) {
+                        draw_tile(plotnum, i = i, td = tiles_data[[plotnum]], image_def = idef, layerdef = layerdef())
+                    }
+                }
+            }
+            ## TODO if .clear_on_zoom, clear the canvas elements here BUT if we are copying canvas to canvas, we need to have saved them first
+            set_pan() ## re-centre the viewport on the canvas
+            for (z in which_are_raster_layers()) {
+                if (.clear_on_zoom) clear_canvas(z)
+                ## TODO is it faster to redraw from the canvas? If the user connection is slow, resend_tiles requires re-sending the full image data for each tile to the canvas from the server (although browser caching might handle it)
+                resend_tiles(plotnum = z, tiles_data = tiles_data_before_zoom, zoomf = zoom_by)
+            }
+            for (z in which_are_vector_layers()) {
+                ## also need to replot the vector layers at their scaled sizes
+                iext_mu <- calc_img_ext(idef) ## full canvas extent in map units, e.g. [-2 2 -2 2]e7
+                ## the normalized x and y extents of the existing (unzoomed) vector layer in that canvas extent
+                iext0_mu <- calc_img_ext(idef0)
+                xn <- (iext0_mu[1:2] - iext_mu[1]) / diff(iext_mu[1:2])
+                yn <- 1 - (iext0_mu[3:4] - iext_mu[3]) / diff(iext_mu[3:4]) ## 1 - because we draw from top
+                ## and thus the region in pixels in the canvas for this tile
+                tlp <- c(xn[1], yn[2]) * image_wh
+                brp <- c(xn[2], yn[1]) * image_wh
+                ## redraw the canvas
+                plotid <- paste0(id, "-plot", z)
+                ## draw to off-screen canvas then replace the on-screen one
+                js <- paste0("var this_cvs = document.getElementById('", plotid, "'); var offs_cvs = document.createElement('canvas'); offs_cvs.width = '", image_wh, "'; offs_cvs.height = '", image_wh, "'; var offs_ctx = offs_cvs.getContext('2d'); offs_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); offs_ctx.imageSmoothingEnabled = false; offs_ctx.drawImage(this_cvs, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");",
+                             ## now clear the on-screen one
+                             "var this_ctx = this_cvs.getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(offs_cvs, 0, 0, ", image_wh, ", ", image_wh, ");")
+                evaljs(js)
+            }
+            ## TODO perhaps, instead of doing the intermediate redraw of each layer individually, collapse them all into a single layer so that we don't get the temporary out-of-sync effect
+            cat("out zoom\n")
+        }
+
+        clear_canvas <- function(z) {
+            plotid <- paste0(id, "-plot", z)
+            js <- paste0("var this_ctx = document.getElementById('", plotid, "').getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");")
+            evaljs(js)
         }
 
         observe({
