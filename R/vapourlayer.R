@@ -514,7 +514,7 @@ cat("--> in update_tiles_data()\n")
             ## td is that tiles_data() entry
             ## i is the index within the layer (> 1 if we have multiple tiles per side)
             ## send tile to canvas
-            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]]) ## figure out for zoomed, if tiles_data has been updated and the data is NULL, this will not get the cached image, it'll fail
+            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]])
             if (!is.null(plot_contents)) {
                 iext_mu <- calc_img_ext(image_def) ## full canvas extent in map units, e.g. [-2 2 -2 2]e7
                 ## the normalized x and y extents of this tile in that canvas extent
@@ -562,16 +562,16 @@ cat("--> in update_tiles_data()\n")
             set_pan()
 #            readline("enter to continue")
         }
-            
-        
+
         ## render data to png, but with caching
         tile_to_png <- function(...) {
             keydata <- list(...)
             if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
-            keydata$td <- keydata$td$img$data[[keydata$i]] ## don't use other bits for cache key calculation
+            keydata$td <- keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
+            keydata$i <- NULL ## so that if we ask for a tile in slot N that was previously in slot M, the cached copy can be used
             key <- rlang::hash(keydata)
-            cat("key:", key, "\n")
-            cat(str(keydata))
+            ## cat("key:", key, "\n")
+            ## cat(str(keydata))
             if (!is.null(cache) && cache$exists(key)) {
                 message("got cached png")
                 return(cache$get(key))
