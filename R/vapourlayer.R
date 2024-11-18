@@ -1,3 +1,17 @@
+fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, resampling, ...) {
+    tryCatch({
+        if (type == "raster_data") {
+            dt <- vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, resample = resampling, options = warp_opts)
+        } else if (type == "raster_image_rgb") {
+            dt <- vapour::gdal_raster_nara(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = resampling, options = warp_opts)
+        } else {
+            ## raster_image_grey
+            dt <- vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = resampling, options = warp_opts)
+        }
+        list(data = dt, type = type, ...)
+    }, error = function(e) list(data = NULL, type = type, err = conditionMessage(e), ...))
+}
+
 #' Vapourlayer map shiny module
 #'
 #' @param id string: HTML element id
@@ -106,7 +120,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         .png_in_memory <- FALSE
         .png_compression_level <- 2L ## 0L is no compression, ~0.1s to write a 2500x2500 image (25MB file); 2L ~1.4s for the same image (9.5MB) or ~0.9s with .use_png_filter = FALSE (11MB file)
         .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
-        .clear_on_zoom <- TRUE ## clear plots on zoom? Or leave them visible while refreshing?
+        .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing?
         .use_ugd <- TRUE ## for vector layers, use unigd:ugd to generate svg
         .clear_canvas_before_drawing <- FALSE
 
@@ -198,24 +212,34 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         check_extent_trigger <- reactiveVal(0L)
         tiles_data <- reactiveVal(rep(list(list(img = NULL)), 9))
 
+        get_pan_js <- function(pxy) {
+            if (missing(pxy)) pxy <- isolate(calc_img_offset(image_def()))
+            paste0("$('#", id, "-pannable').css({'left':'", pxy[1], "px', 'top':'", pxy[2], "px'});", collapse = "")
+        }
         set_pan <- function(pxy) {
             if (is.null(isolate(view_wh()))) return(NULL)
             if (missing(pxy)) pxy <- isolate(calc_img_offset(image_def()))
             cat("set_pan: ", pxy, "\n")
-            evaljs(paste0("$('#", id, "-pannable').css({'left':'", pxy[1], "px', 'top':'", pxy[2], "px'});", collapse = ""))
+            evaljs(get_pan_js(pxy))
         }
 
         send_plot <- function(plot_contents, plotnum, x = 0, y = 0, w = image_wh, h = image_wh, clear = .clear_canvas_before_drawing, as = "file") {
             cat("plot", plotnum, "updated, sending to js ")
             plotid <- paste0(id, "-plot", plotnum)
+            panjs <- ""
+            if (set_pan_on_plot) {
+                panjs <- get_pan_js()
+                set_pan_on_plot <<- FALSE
+            }
             if (as == "svg") {
                 cat("as svg\n")
                 ## plot contents is an svg string
                 js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
                   "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                   if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
-                  "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); }; image_", id, "_", plotnum, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
+                  "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); ", panjs, "}; image_", id, "_", plotnum, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
                 evaljs(js)
+#                readline("enter to continue")
             } else {
                 ## plot_contents is a file or raw vector
                 if (is.raw(plot_contents)) {
@@ -228,10 +252,9 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
                              "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                              if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
-                             "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); }; image_", id, "_", plotnum, ".src = '", plot_contents, "';")
+                             "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); ", panjs, "}; image_", id, "_", plotnum, ".src = '", plot_contents, "';")
                 evaljs(js)
             }
-            set_pan()
         }
         clear_plot <- function(plotnum) {
             ## can be multiple plotnums
@@ -239,6 +262,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             evaljs("var this_ctx;", paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "'); if (this_ctx) { this_ctx.getContext('2d').clearRect(0, 0, 3200, 3200); }", collapse = ""))
         }
 
+        set_pan_on_plot <- FALSE
         extend_tiles <- function(x = 0, y = 0, z) {
             if (.debug > 1) cat("--> in extend_tiles()\n")
             if (.clear_on_zoom) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround TODO check and fix
@@ -256,6 +280,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 i$xy$y <- i$xy$y + diff(iext[3:4]) / 2
             }
             image_def(i) ## update the image reactive
+            ## ask for pan to be reset when the next plot occurs (don't do it directly here, otherwise we're panning before the re-plot)
+            set_pan_on_plot <<- TRUE
             ## don't think this is needed, because the "generic" update_tiles_data observer should catch the change to image_def
             ## for (zz in z) {
             ##     cat("updating tiles data for layer:", zz, "\n")
@@ -280,20 +306,6 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             isolate(which(!vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
         }
 
-        fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, ...) {
-            tryCatch({
-                if (type == "raster_data") {
-                    dt <- vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, resample = .resampling_method, options = warp_opts)
-                } else if (type == "raster_image_rgb") {
-                    dt <- vapour::gdal_raster_nara(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
-                } else {
-                    ## raster_image_grey
-                    dt <- vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = .resampling_method, options = warp_opts)
-                }
-                list(data = dt, type = type, ...)
-            }, error = function(e) list(data = NULL, type = type, err = conditionMessage(e), ...))
-        }
-
         handle_tile_data <- function(result) {
             td <- isolate(tiles_data())
             td2 <- td[[result$z]]
@@ -312,7 +324,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             this_ext <- xywh_to_ext(x = t$xy$x[i], y = t$xy$y[i], w = t$w, h = t$h)
             cat("fetching data: ext ", this_ext, ", res ", t$res, "\n")
             ld <- layerdef()[[z]]
-            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs, warp_opts = .warp_opts)
+            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs, warp_opts = .warp_opts, resampling = .resampling_method)
             key <- rlang::hash(rgs)
             if (!is.null(cache) && cache$exists(key)) {
                 result <- cache$get(key)
@@ -328,12 +340,13 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             } else {
                 rgs <- c(rgs, list(i = i, id = ids[i], key = key))
                 ## cat("fetching:\n"); cat(utils::str(rgs))
-                ## tictoc::tic()
-                ## TODO dispatch is slow, ~0.3s per call. Change this to a single mirai call that itself dispatches multiple calls?
-      cat("fetch args:\n")
-      cat(str(rgs))
-                mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
-                ## tictoc::toc()
+                ##if (.debug > 1)
+                if (.debug > 1) temp <- proc.time()["elapsed"]
+                mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs)## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
+                if (.debug > 1) {
+                    temp <- proc.time()["elapsed"] - temp
+                    message("mirai dispatch time time: ", round(temp, 3), "s")
+                }
                 if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
             }
         }
@@ -530,13 +543,18 @@ cat("--> in update_tiles_data()\n")
 
                 cat("sending tile to js ")
                 plotid <- paste0(id, "-plot", z)
+                panjs <- ""
+                if (set_pan_on_plot) {
+                    panjs <- get_pan_js()
+                    set_pan_on_plot <<- FALSE
+                }
                 if (as == "svg") {
                     cat("as svg\n")
                     ## plot contents is an svg string
                     js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
                                  ##"this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                                  if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], ");"),
-                                 "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], "); }; image_", id, "_", z, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
+                                 "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], "); ", panjs, "}; image_", id, "_", z, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
                     evaljs(js)
                                         #                readline("enter to continue")
                 } else {
@@ -551,16 +569,10 @@ cat("--> in update_tiles_data()\n")
                     js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
                                  ##"this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                                  if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");"),
-                                 "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), "); }; image_", id, "_", z, ".src = '", plot_contents, "';")
-
-                    ## plotid <- paste0(id, "-plot", z); plot_contents <- paste0("plots/", basename(plot_contents))
-                    ## js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');", "this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");", "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), "); }; image_", id, "_", z, ".src = '", plot_contents, "';"); evaljs(js)
-
+                                 "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), "); ", panjs, "}; image_", id, "_", z, ".src = '", plot_contents, "';")
                     evaljs(js)
                 }
             }
-            set_pan()
-#            readline("enter to continue")
         }
 
         ## render data to png, but with caching

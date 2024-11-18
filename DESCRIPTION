@@ -21,7 +21,6 @@ Imports:
   DT,
   fastpng,
   htmltools,
-  unigd,
   leaflet,
   magrittr,
   mirai,
@@ -32,6 +31,7 @@ Imports:
   sf,
   shiny,
   tibble,
+  unigd,
   uuid,
   vapour,
   ximage
