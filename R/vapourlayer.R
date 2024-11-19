@@ -602,7 +602,9 @@ cat("--> in update_tiles_data()\n")
                 if (layerdef$type == "raster_data") {
                     zl <- if (is.null(layerdef$zlims[[1]])) stop("need z limits") else layerdef$zlims[[1]]
                     cmap <- layerdef$cmap[[1]]
-                    pltf <- fastpng::write_png(td$img$data[[i]][[1]], palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
+                    tdim <- attr(td$img$data[[i]], "dimension")
+                    m <- pmax(pmin(round((matrix(td$img$data[[i]][[1]], nrow = tdim[2], byrow = TRUE) - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L ## construct matrix, scale by given zlim and then map to colour range, using zero-based indexing
+                    pltf <- fastpng::write_png(m, palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
                 } else {
                     ## image, rgb or greyscale
                     nara <- inherits(td$img$data[[i]][[1]], "nativeRaster")
