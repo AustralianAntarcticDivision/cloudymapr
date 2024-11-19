@@ -47,8 +47,8 @@ vl_map_ui <- function(id, view_wh = c(40, 40)) {
                                              Pannable(document.querySelector('#", id, "'));
                                              Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth);
                                              Shiny.setInputValue('", id, "-view_wh', '", paste0(view_wh, collapse = ","), "');
-                                             $('#", id, "-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [1, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
-                                             $('#", id, "-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [-1, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
+                                             $('#", id, "-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [2, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
+                                             $('#", id, "-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [0.5, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
                                              var ", id, "_br_rsztmr;
                                              $(window).resize(function() {
                                                clearTimeout(", id, "_br_rsztmr);
@@ -223,6 +223,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             evaljs(get_pan_js(pxy))
         }
 
+        set_pan_on_plot <- FALSE ## if this is set to TRUE by the calling code (somewhere in the chain before this function is called) the viewport will be re-panned as part of the plot drawing
         send_plot <- function(plot_contents, plotnum, x = 0, y = 0, w = image_wh, h = image_wh, clear = .clear_canvas_before_drawing, as = "file") {
             cat("plot", plotnum, "updated, sending to js ")
             plotid <- paste0(id, "-plot", plotnum)
@@ -262,7 +263,6 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             evaljs("var this_ctx;", paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "'); if (this_ctx) { this_ctx.getContext('2d').clearRect(0, 0, 3200, 3200); }", collapse = ""))
         }
 
-        set_pan_on_plot <- FALSE
         extend_tiles <- function(x = 0, y = 0, z) {
             if (.debug > 1) cat("--> in extend_tiles()\n")
             if (.clear_on_zoom) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround TODO check and fix
@@ -332,22 +332,22 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 result$id <- ids[i]
                 cat("got cached data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
                 handle_tile_data(result)
-                return(invisible(NULL))
-            }
-            ## if a fetch request is already happening with this key, don't re-issue a new fetch request
-            if (key %in% sapply(mirai_queue, function(job) job$key)) {
-                ## cat("request with key", key, "is already in the queue, not re-queueing\n")
             } else {
-                rgs <- c(rgs, list(i = i, id = ids[i], key = key))
-                ## cat("fetching:\n"); cat(utils::str(rgs))
-                ##if (.debug > 1)
-                if (.debug > 1) temp <- proc.time()["elapsed"]
-                mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs)## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
-                if (.debug > 1) {
-                    temp <- proc.time()["elapsed"] - temp
-                    message("mirai dispatch time time: ", round(temp, 3), "s")
+                ## if a fetch request is already happening with this key, don't re-issue a new fetch request
+                if (key %in% sapply(mirai_queue, function(job) job$key)) {
+                    ## cat("request with key", key, "is already in the queue, not re-queueing\n")
+                } else {
+                    rgs <- c(rgs, list(i = i, id = ids[i], key = key))
+                    ## cat("fetching:\n"); cat(utils::str(rgs))
+                    ##if (.debug > 1)
+                    if (.debug > 2) temp <- proc.time()["elapsed"]
+                    mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs)## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
+                    if (.debug > 2) {
+                        temp <- proc.time()["elapsed"] - temp
+                        message("mirai dispatch time time: ", round(temp, 3), "s")
+                    }
+                    if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
                 }
-                if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
             }
         }
 
@@ -832,35 +832,27 @@ cat("--> in vector layer plotter\n")
                 vps_mu <- pixels_to_mu(get_viewport_size()) ## viewport size in map units
                 zoomf <- min(vps_mu[1] / abs(diff(mxy[c(1, 2)])), vps_mu[2] / abs(diff(mxy[c(3, 4)])))
                 zoomc <- c((mxy[1] + mxy[2]) / 2, (mxy[3] + mxy[4]) / 2)
-                ##cat("zoom factor:", zoomf, ", with centre:", zoomc, "\n")
+                ## always zoomf by powers of 2
+                zoomf <- 2^(sign(log2(zoomf)) * ceiling(abs(log2(zoomf))))
                 do_zoom(zoomc, zoom_by = zoomf)
             }
         })
 
         observeEvent(input$do_zoom, {
             req(input$do_zoom)
-            cat("zoom:", utils::capture.output(utils::str(input$do_zoom)), "\n")
             ## pressing the zoom in/out buttons will give a vector with [zoom_direction left_offset top_offset] where the offsets are the current css offsets of the viewport in pixels
             ## and so (left_offset + viewport_width/2, top_offset + viewport_height/2) is the viewport-centre-pixel of the unzoomed image (also of the canvas), from which we can calculate the map coords on which to centre the zoom mxy with e.g.
             ## mxy <- calc_img_ext(image_def())[c(1, 4)] + c(1, -1) * pixels_to_mu(input$do_zoom[2:3] + get_viewport_size() / 2)
             ## BUT mxy should be the same as viewport_ctr(), and mxy seems to suffer from pixel-rounding errors, so use viewport_ctr() at least for now
-            do_zoom(in_out = input$do_zoom[1])
+            do_zoom(zoom_by = input$do_zoom[1])
         })
 
-        do_zoom <- function(mxy, in_out, zoom_by) {
+        do_zoom <- function(mxy, zoom_by) {
             ## mxy is the point on which to centre the zoom, in map units
             if (missing(mxy)) mxy <- isolate(viewport_ctr())
-            cat("do_zoom, ctr: ", mxy, "\n")
+            if (.debug > 0) message("do_zoom, by: ", zoom_by, ", centred on: [", mxy[1], ", ", mxy[2], "]")
             ## mxy is map units of centre point of zoom
-            ## in_out is 1 for in, -1 for out, or specify zoom_by (zoom factor)
-            if (missing(in_out)) in_out <- (zoom_by > 1) * 2L - 1L
-            if (missing(zoom_by)) zoom_by <- NA
-            ## TODO we might need a zoom-out limit?
-            if (in_out > 0) {
-                if (is.na(zoom_by)) zoom_by <- 2
-            } else {
-                if (is.na(zoom_by)) zoom_by <- 1/2
-            }
+            ## zoom_by should be > 1 to zoom in, < 1 to zoom out, powers of 2
             ## some things before zooming
             vps_mu <- pixels_to_mu(get_viewport_size()) ## current viewport size in map units
             ## update the tile centres, width, height
@@ -901,7 +893,7 @@ cat("--> in vector layer plotter\n")
                 }
             }
             ## TODO if .clear_on_zoom, clear the canvas elements here BUT if we are copying canvas to canvas, we need to have saved them first
-            set_pan() ## re-centre the viewport on the canvas
+            set_pan_on_plot <<- TRUE
             for (z in which_are_raster_layers()) {
                 if (.clear_on_zoom) clear_canvas(z)
                 ## TODO is it faster to redraw from the canvas? If the user connection is slow, resend_tiles requires re-sending the full image data for each tile to the canvas from the server (although browser caching might handle it)
