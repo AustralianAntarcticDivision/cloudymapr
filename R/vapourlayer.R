@@ -595,14 +595,19 @@ cat("--> in update_tiles_data()\n")
                     cmap <- c(cmap, "#FFFFFF00") ## transparent
                     m[is.na(m)] <- length(cmap) - 1L
                     rgs <- list(m, palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
+                } else if (layerdef$type == "raster_image_grey") {
+                    ## greyscale image
+                    dat <- as.vector(td$img$data[[i]][[1]])
+                    tdim <- attr(td$img$data[[i]], "dimension")
+                    rgs <- list(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 1, bits = 8), use_filter = use_png_filter)
                 } else {
-                    ## image, rgb or greyscale
+                    ## image or rgb
                     nara <- inherits(td$img$data[[i]][[1]], "nativeRaster")
                     dat <- if (nara) td$img$data[[i]][[1]] else as.vector(matrix(unlist(td$img$data[[i]][[1]]), byrow = TRUE, nrow = 3))
                     tdim <- attr(td$img$data[[i]], "dimension")
                     rgs <- list(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
                 }
-                ## if ("extra_args" %in% names(layerdef) && !is.null(layerdef$extra_args[[1]])) rgs <- c(rgs, layerdef$extra_args[[1]])
+                if ("extra_args" %in% names(layerdef) && !is.null(layerdef$extra_args[[1]])) rgs <- c(rgs, layerdef$extra_args[[1]])
                 if (.debug > 1) temp <- proc.time()["elapsed"]
                 pltf <- do.call(fastpng::write_png, rgs)
                 if (.debug > 1) message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!.png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
@@ -678,7 +683,7 @@ cat("--> in update_tiles_data()\n")
                         ## tictoc::toc()
                         ## pltf <- fastpng::write_png(big, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
                     } else {
-                        ## image, rgb or greyscale
+                        ## image or rgb or greyscale
                         ## if it's greyscale we get one band back, but we assemble here into 3 bands (rgb)
                         ## inefficient but I think fastpng requires it? (can handle 2d matrix but will scale the limits to 0-1)
                         ## if we used gdal_raster_image fastpng::write_png(255 - aperm(array(col2rgb(td$data[[1]][[1]]), c(3, attr(td$data[[1]], "dimension"))), c(3, 2, 1)), filename = pltf, convert_to_row_major = TRUE)
