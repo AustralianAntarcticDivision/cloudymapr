@@ -843,40 +843,26 @@ cat("--> in vector layer plotter\n")
             ## mxy is the point on which to centre the zoom, in map units
             if (missing(mxy)) mxy <- isolate(viewport_ctr())
             if (.debug > 0) message("do_zoom, by: ", zoom_by, ", centred on: [", mxy[1], ", ", mxy[2], "]")
-            ## mxy is map units of centre point of zoom
+            ## mxy is map units of centre point of view after zooming
             ## zoom_by should be > 1 to zoom in, < 1 to zoom out, powers of 2
-            ## some things before zooming
-            vps_mu <- pixels_to_mu(get_viewport_size()) ## current viewport size in map units
             ## update the tile centres, width, height
             idef0 <- idef <- image_def()
-            tiles_data_before_zoom <- isolate(tiles_data())
+            tiles_data_before_zoom <- isolate(tiles_data()) ## keep this, because we'll re-render from what we have (at non-zoomed resolution) while we wait for the zoomed-resolution data to arrive
             idef$res <- idef$res / zoom_by
             idef$w <- idef$w / zoom_by
             idef$h <- idef$h / zoom_by
-##                 ## ^^^ TODO align to common grid boundaries to help with caching
-##                 ## we will always align our tiles so that they align with (x) initial_view$extent[1] + N * CURRENT_tile_w and (y) initial_view$extent[3] + M * CURRENT_tile_h
-##                 ## so N = (newx0 - initial_view$extent[1])/CURRENT_tile_w
-##                 newx0 <- mxy[1] - idef$w / 2
-##                 N <- round((newx0 - initial_view$extent[1])/idef$w)
-##                 initial_view$extent[1] + N * idef$w
-##                 newx0 <- min(idef0$xy$x) - idef0$w/2
-## #N * current_tile_w + initial_view$extent[1]
-## browser()
-                
-        ##view_ref <- list(x0 = initial_view$extent[1], y0 = initial_view$extent[3], 
-#        image_def <- reactiveVal(list(tiles_per_side = initial_view$tiles_per_side,
-#                                      n_tiles = initial_view$tiles_per_side ^ 2,
-#                                      xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords
-#                                      xy = as.data.frame(tempxy), ## xy centres of tiles in map coords
-#                                      w = tile_w, h = tile_h, ## tile width and height in map coords
-#                                      res = initial_view$res))
-
-                ## mxy is where the zoomed view should be centred, but not necessarily the centre of the zoomed image extents
-                
-            idef$xy$x <- mxy[1] + idef$w * image_def()$xy_grid[, 1]
-            idef$xy$y <- mxy[2] + idef$h * image_def()$xy_grid[, 2]
+            ## align tiles to common grid boundaries to help with caching
+            ## align tiles so that they align with (x) initial_view$extent[1] + N * CURRENT_tile_w and (y) initial_view$extent[3] + M * CURRENT_tile_h
+            ## and also having mxy close to the centre of the zoomed extent
+            ## so first find the multiple of initial_view$extent[1] + N * ctw that is closest to mxy[1]
+            Nw <- round((mxy[1] - initial_view$extent[1]) / idef$w)
+            Nh <- round((mxy[2] - initial_view$extent[3]) / idef$h)
+            zctr <- c((Nw * idef$w) + initial_view$extent[1], (Nh * idef$h) + initial_view$extent[3]) ## this is the centre of the zoomed extent
+            idef$xy$x <- zctr[1] + idef$w * image_def()$xy_grid[, 1]
+            idef$xy$y <- zctr[2] + idef$h * image_def()$xy_grid[, 2]
             image_def(idef)
-            viewport_ctr(mxy)
+            ## mxy is where the zoomed view should be centred, but not necessarily the centre of the zoomed image extents
+            viewport_ctr(mxy) ## this should do little or nothing if the user clicked the zoom button (because the centre of the current view is taken as the point to centre the zoomed view on), but it will do something if they zoomed to a rectangle
             resend_tiles <- function(plotnum, tiles_data, zoomf, clear = .clear_canvas_before_drawing) {
                 if (length(layerdef()[[plotnum]]) > 0) {
                     for (i in seq_along(tiles_data[[plotnum]]$img$data)) {
@@ -887,7 +873,7 @@ cat("--> in vector layer plotter\n")
             ## TODO if .clear_on_zoom, clear the canvas elements here BUT if we are copying canvas to canvas, we need to have saved them first
             set_pan_on_plot <<- TRUE
             for (z in which_are_raster_layers()) {
-                if (.clear_on_zoom) clear_canvas(z)
+                if (.clear_on_zoom) clear_plot(z)
                 ## TODO is it faster to redraw from the canvas? If the user connection is slow, resend_tiles requires re-sending the full image data for each tile to the canvas from the server (although browser caching might handle it)
                 resend_tiles(plotnum = z, tiles_data = tiles_data_before_zoom, zoomf = zoom_by)
             }
@@ -911,12 +897,6 @@ cat("--> in vector layer plotter\n")
             }
             ## TODO perhaps, instead of doing the intermediate redraw of each layer individually, collapse them all into a single layer so that we don't get the temporary out-of-sync effect
             cat("out zoom\n")
-        }
-
-        clear_canvas <- function(z) {
-            plotid <- paste0(id, "-plot", z)
-            js <- paste0("var this_ctx = document.getElementById('", plotid, "').getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");")
-            evaljs(js)
         }
 
         observe({
