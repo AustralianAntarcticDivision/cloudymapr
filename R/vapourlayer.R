@@ -172,13 +172,6 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         calc_img_ext <- function(idef) c(min(idef$xy$x - idef$w / 2), max(idef$xy$x + idef$w / 2), min(idef$xy$y - idef$h / 2), max(idef$xy$y + idef$h / 2))
         xywh_to_ext <- function(x, y, w, h) unname(c(x + c(-1, 1) * w / 2, y + c(-1, 1) * h / 2))
 
-## function releaseCanvas(canvas) {
-##     canvas.width = 1;
-##     canvas.height = 1;
-##     const ctx = canvas.getContext('2d');
-##     ctx && ctx.clearRect(0, 0, 1, 1);
-## }
-
 ## iOS max canvas size is 4096 x 4096, other browsers like 10k x 10k
 
         ##get_native_tile_wh <- function() {
@@ -235,7 +228,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             if (as == "svg") {
                 cat("as svg\n")
                 ## plot contents is an svg string
-                js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = ", id, "_ctxlist[", plotnum, "];",
                   "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                   if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
                   "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); ", panjs, "}; image_", id, "_", plotnum, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
@@ -250,7 +243,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                     cat("as image from file\n")
                     plot_contents <- paste0("plots/", basename(plot_contents))
                 }
-                js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = ", id, "_ctxlist[", plotnum, "];",
                              "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                              if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
                              "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); ", panjs, "}; image_", id, "_", plotnum, ".src = '", plot_contents, "';")
@@ -260,7 +253,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         clear_plot <- function(plotnum) {
             ## can be multiple plotnums
             cat("clearing plot", plotnum, "\n")
-            evaljs("var this_ctx;", paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "'); if (this_ctx) { this_ctx.getContext('2d').clearRect(0, 0, 3200, 3200); }", collapse = ""))
+            evaljs(paste0("var this_ctx = ", id, "_ctxlist[", plotnum, "]; if (this_ctx) { this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); }"))
         }
 
         extend_tiles <- function(x = 0, y = 0, z) {
@@ -439,20 +432,12 @@ cat("--> in update_tiles_data()\n")
             io
         }
 
-        ## initial setup, calculate the initial offset to apply to the images
-        init0 <- FALSE
-        observe({
-            if (!init0) {
-                init0 <<- TRUE
-                ## INIT evaljs("$('#", id, "').width('", view_wh[1], "vw').height('", view_wh[2], "vh');")
-                evaljs("$('#", id, "-pannable').width('", image_wh, "px').height('", image_wh, "px');")
-                ## set the canvas sizes
-                evaljs(paste(sapply(1:9, function(plotnum) paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "').getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";")), collapse = ""))
-                ## TODO store array of contexts - but discard the pair plots idea first if possible
-##?!?                evaljs("var this_ctx;")
-##?!?                for (plotnum in 1:9) evaljs(paste0("this_ctx = document.getElementById('", id, "-plot", plotnum, "').getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";", collapse = ""))
-            }
-        })
+        ## initial setup
+        ## this doesn't need to be reactive, it only relies on constants (image_wh, id) and the dom being initialized, which it will be by the time this is called
+        ## set the canvas sizes and store array of contexts
+        evaljs(paste0("$('#", id, "-pannable').width('", image_wh, "px').height('", image_wh, "px'); ",
+                      id, "_ctxlist = []; for (let i = 1; i <= 9; i++) { var this_ctx = document.getElementById('", id, "-plot' + i).getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, "; ", id, "_ctxlist[i] = this_ctx; } "))
+
         observe({
             ## get the viewport width and height via js (this means that we only need to specify view_wh in the ui call, not the server as well)
             cat("checking view_wh\n")
@@ -551,7 +536,7 @@ cat("--> in update_tiles_data()\n")
                 if (as == "svg") {
                     cat("as svg\n")
                     ## plot contents is an svg string
-                    js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                    js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
                                  ##"this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                                  if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], ");"),
                                  "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], "); ", panjs, "}; image_", id, "_", z, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
@@ -566,7 +551,7 @@ cat("--> in update_tiles_data()\n")
                         cat("as image from file\n")
                         plot_contents <- paste0("plots/", basename(plot_contents))
                     }
-                    js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = document.getElementById('", plotid, "').getContext('2d');",
+                    js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
                                  ##"this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
                                  if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");"),
                                  "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), "); ", panjs, "}; image_", id, "_", z, ".src = '", plot_contents, "';")
