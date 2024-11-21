@@ -4,7 +4,7 @@ const Pannable = (elViewport) => {
     let isPan = false;
     let didPan = false;
     let dragrect = {};
-    const canvas = elViewport.firstElementChild; // TODO use id-canvas
+    const canvas = elViewport.getElementsByClassName("viewport-canvas")[0]; // or use id-canvas or even elViewport.firstElementChild, but that would be fragile to html changes
     const ctx = canvas.getContext('2d');
 
     const panStart = (ev) => {

@@ -67,7 +67,7 @@ vl_map_ui <- function(id, view_wh = c(40, 40)) {
                           actionButton(NS(id, "select_button"), class = "btn btn-default", label = icon("object-group", id = NS(id, "select-icon"), class = "icon-disabled"), title = "Select region")
                           ),
                  tags$div(id = id, class = "viewport", `data-wh` = paste0(view_wh, collapse = ","),
-                          tags$canvas(id = NS(id, "canvas"), class = "viewport-canvas"),
+                          tags$canvas(id = NS(id, "canvas"), class = "viewport-canvas"), ## used for the panning, rectangle-dragging, etc
                           do.call(tags$div, c(list(id = NS(id, "pannable"), class = "viewport-pannable"),
                                               lapply(9:1, function(z) tags$canvas(id = NS(id, paste0("plot", z)), class = "viewport-image"))))
                           )
@@ -122,6 +122,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
         .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing?
         .use_ugd <- TRUE ## for vector layers, use unigd:ugd to generate svg
+        .svg_as_file <- TRUE ## if FALSE, send the svg string directly to the browser as b64-encoded data: but think that using a file is better for caching behaviour
         .clear_canvas_before_drawing <- FALSE
 
         ## generate our image_def from the user-supplied initial_view
@@ -225,7 +226,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 panjs <- get_pan_js()
                 set_pan_on_plot <<- FALSE
             }
-            if (as == "svg") {
+            if (as == "svg" && !.svg_as_file) {
                 cat("as svg\n")
                 ## plot contents is an svg string
                 js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = ", id, "_ctxlist[", plotnum, "];",
@@ -254,6 +255,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             ## can be multiple plotnums
             cat("clearing plot", plotnum, "\n")
             evaljs(paste0("var this_ctx = ", id, "_ctxlist[", plotnum, "]; if (this_ctx) { this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); }"))
+            vector_plot_sources[plotnum] <<- NA_character_
         }
 
         extend_tiles <- function(x = 0, y = 0, z) {
@@ -323,7 +325,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                 result <- cache$get(key)
                 result$i <- i
                 result$id <- ids[i]
-                cat("got cached data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
+                if (.debug > 2) message("got cached data for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
                 handle_tile_data(result)
             } else {
                 ## if a fetch request is already happening with this key, don't re-issue a new fetch request
@@ -356,7 +358,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                     if (!mirai::unresolved(job)) {
                         result <- job$data
                         done <- c(done, ji)
-                        cat("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n")
+                        if (.debug > 2) message("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
                         if (is.null(result$err)) {
                             if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
@@ -533,7 +535,7 @@ cat("--> in update_tiles_data()\n")
                     panjs <- get_pan_js()
                     set_pan_on_plot <<- FALSE
                 }
-                if (as == "svg") {
+                if (as == "svg" && !.svg_as_file) {
                     cat("as svg\n")
                     ## plot contents is an svg string
                     js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
@@ -761,15 +763,15 @@ cat("--> in vector layer plotter\n")
             for (i in seq_along(layerdef())) do_vector_plot(i, iext)
         }, priority = 9)
 
-        do_vector_plot <- function(i, iext, and_stop = FALSE) {
+        vector_plot_sources <- rep(NA_character_, 9)
+        do_vector_plot <- function(i, iext) {
             ld <- isolate(layerdef())
             if (missing(iext)) iext <- calc_img_ext(image_def())
-            if (and_stop) browser()
             if (!is.null(ld[[i]]) && "fun" %in% names(ld[[i]])) {
                 z <- ld[[i]]$z
-                cat("rendering plot", i, "layer", z, " as", if (.use_ugd) "svg\n" else "png\n")
+                cat("rendering plot", i, "layer", z, " as", if (.use_ugd && .svg_as_file) "svg file" else if (.use_ugd) "svg" else "png", "\n")
                 ##tictoc::tic()
-                pltf <- tempfile(tmpdir = tmpd, fileext = ".png")
+                pltf <- tempfile(tmpdir = tmpd, fileext = if (.svg_as_file) ".svg" else ".png")
                 ##IMSRC need to keep track of pltf for each non-raster source as well
                 if (!.use_ugd) {
                     png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
@@ -780,16 +782,22 @@ cat("--> in vector layer plotter\n")
                 par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
                 ok <- ld[[i]]$fun(xlim = iext[1:2], ylim = iext[3:4])
                 if (ok && .use_ugd) {
-                    pltf <- unigd::ugd_render(as = "svg")
-                    pltf <- sub("<rect width=\"100%\" height=\"100%\" style=\"stroke: none;fill: #FFFFFF;\"/>", "", pltf, fixed = TRUE)
+                    if (.svg_as_file) {
+                        unigd::ugd_save(file = pltf)
+                    } else {
+                        pltf <- unigd::ugd_render(as = "svg")
+                    }
                 }
                 par(opar)
-                dev.off()
+                if (!.use_ugd) dev.off()
                 ##tictoc::toc()
-                if (.use_ugd) {
-                    if (ok) send_plot(pltf, z, as = "svg") else clear_plot(z)
+                if (!ok) {
+                    clear_plot(z)
+                } else if (.use_ugd && !.svg_as_file) {
+                    send_plot(pltf, z, as = "svg")
                 } else {
-                    if (ok) send_plot(pltf, z) else clear_plot(z)
+                    vector_plot_sources[z] <<- pltf
+                    send_plot(pltf, z)
                 }
             }
         }
@@ -889,14 +897,24 @@ cat("--> in vector layer plotter\n")
                 brp <- c(xn[2], yn[1]) * image_wh
                 ## redraw the canvas
                 plotid <- paste0(id, "-plot", z)
-                ## draw to off-screen canvas then replace the on-screen one
-                js <- paste0("var this_cvs = document.getElementById('", plotid, "'); var offs_cvs = document.createElement('canvas'); offs_cvs.width = '", image_wh, "'; offs_cvs.height = '", image_wh, "'; var offs_ctx = offs_cvs.getContext('2d'); offs_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); offs_ctx.imageSmoothingEnabled = false; offs_ctx.drawImage(this_cvs, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");",
-                             ## now clear the on-screen one
-                             "var this_ctx = this_cvs.getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(offs_cvs, 0, 0, ", image_wh, ", ", image_wh, ");")
-                evaljs(js)
+                if (!.svg_as_file) {
+                    ## redraw from the canvas: draw at zoomed extent to an off-screen canvas then replace the on-screen one
+                    ## TODO? use https://developer.mozilla.org/en-US/docs/Web/API/OffscreenCanvas but note relatively recent support only
+                    js <- paste0("var this_cvs = document.getElementById('", plotid, "'); var offs_cvs = document.createElement('canvas'); offs_cvs.width = '", image_wh, "'; offs_cvs.height = '", image_wh, "'; var offs_ctx = offs_cvs.getContext('2d'); offs_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); offs_ctx.imageSmoothingEnabled = false; offs_ctx.drawImage(this_cvs, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");",
+                                 ## now clear the on-screen one
+                                 "var this_ctx = this_cvs.getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(offs_cvs, 0, 0, ", image_wh, ", ", image_wh, ");")
+                    evaljs(js)
+                } else {
+                    ## redraw from the image file (fast if the browser has cached it)
+                    if (!is.na(vector_plot_sources[z])) {
+                        send_plot(vector_plot_sources[z], z, x = tlp[1], y = tlp[2], w = abs(brp[1] - tlp[1]), h = abs(brp[2] - tlp[2]), clear = TRUE)
+                    } else {
+                        clear_plot(z)
+                    }
+                }
             }
             ## TODO perhaps, instead of doing the intermediate redraw of each layer individually, collapse them all into a single layer so that we don't get the temporary out-of-sync effect
-            cat("out zoom\n")
+            cat("done zoom\n")
         }
 
         observe({
