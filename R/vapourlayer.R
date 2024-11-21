@@ -589,16 +589,21 @@ cat("--> in update_tiles_data()\n")
                     cmap <- layerdef$cmap[[1]]
                     tdim <- attr(td$img$data[[i]], "dimension")
                     m <- pmax(pmin(round((matrix(td$img$data[[i]][[1]], nrow = tdim[2], byrow = TRUE) - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L ## construct matrix, scale by given zlim and then map to colour range, using zero-based indexing
-                    pltf <- fastpng::write_png(m, palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
+                    ## any NA/NaN's will still be present, make them transparent
+                    cmap <- c(cmap, "#FFFFFF00") ## transparent
+                    m[is.na(m)] <- length(cmap) - 1L
+                    rgs <- list(m, palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
                 } else {
                     ## image, rgb or greyscale
                     nara <- inherits(td$img$data[[i]][[1]], "nativeRaster")
                     dat <- if (nara) td$img$data[[i]][[1]] else as.vector(matrix(unlist(td$img$data[[i]][[1]]), byrow = TRUE, nrow = 3))
-                    if (.debug > 1) temp <- proc.time()["elapsed"]
                     tdim <- attr(td$img$data[[i]], "dimension")
-                    pltf <- fastpng::write_png(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
-                    if (.debug > 1) message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!.png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
+                    rgs <- list(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
                 }
+                ## if ("extra_args" %in% names(layerdef) && !is.null(layerdef$extra_args[[1]])) rgs <- c(rgs, layerdef$extra_args[[1]])
+                if (.debug > 1) temp <- proc.time()["elapsed"]
+                pltf <- do.call(fastpng::write_png, rgs)
+                if (.debug > 1) message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!.png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
             } else {
                 stop("not coded")
             }
