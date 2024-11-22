@@ -794,7 +794,7 @@ cat("--> in vector layer plotter\n")
                     }
                 }
                 par(opar)
-                if (!.use_ugd) dev.off()
+                dev.off() ## for both ugd and png devices
                 ##tictoc::toc()
                 if (!ok) {
                     clear_plot(z)
@@ -884,30 +884,63 @@ cat("--> in vector layer plotter\n")
                 }
             }
             ## TODO if .clear_on_zoom, clear the canvas elements here BUT if we are copying canvas to canvas, we need to have saved them first
-            set_pan_on_plot <<- TRUE
+            set_pan_on_plot <<- TRUE ## pan when the first layer is redrawn
+            iext_mu0 <- calc_img_ext(idef0) ## full unzoomed canvas extent in map units, e.g. [-2 2 -2 2]e7
+            iext_mu <- calc_img_ext(idef) ## full zoomed canvas extent in map units
             for (z in which_are_raster_layers()) {
-                if (.clear_on_zoom) clear_plot(z)
-                ## TODO is it faster to redraw from the canvas? If the user connection is slow, resend_tiles requires re-sending the full image data for each tile to the canvas from the server (although browser caching might handle it)
-                resend_tiles(plotnum = z, tiles_data = tiles_data_before_zoom, zoomf = zoom_by)
+                if (FALSE) {
+                    ## re-draw each tile from its source image at zoomed resolution. Fast so long as the browser cache still holds the image file, which it generally seems to. BUT only works if tiles_per_side is 1 or 2, because it's plotting the whole tile, and so tiles overlap when tiles_per_side > 2. Needs adjustment to plot only the relevant section of each tile (but that manipulation might be slow?)
+                    if (.clear_on_zoom) clear_plot(z)
+                    resend_tiles(plotnum = z, tiles_data = tiles_data_before_zoom, zoomf = zoom_by)
+                } else {
+                    ## copy the existing canvas to offscreen, then draw the relevant portion back to the visible canvas
+                    ## the normalized x and y extents of the zoomed region in the original/unzoomed canvas
+                    xn <- (iext_mu[1:2] - iext_mu0[1]) / diff(iext_mu0[1:2])
+                    yn <- 1 - (iext_mu[3:4] - iext_mu0[3]) / diff(iext_mu0[3:4])
+                    ## and thus the region in pixels in the unzoomed canvas that we want
+                    tlp <- c(xn[1], yn[2]) * image_wh
+                    brp <- c(xn[2], yn[1]) * image_wh
+                    panjs <- ""
+                    if (set_pan_on_plot) {
+                        panjs <- get_pan_js(calc_img_offset(idef)) ## pass idef here because the image_def() reactive might not have updated yet
+                        set_pan_on_plot <<- FALSE # do this for the first raster layer only
+                    }
+                    ## TODO is it faster to (re)use a single OffscreenCanvas instead of instantiating a new one each time? Also for older browsers that don't support this, would presumably need to use a canvas in the DOM (but not visible)
+                    js <- paste0("var ocv = new OffscreenCanvas(", image_wh, ", ", image_wh, "); var octx = ocv.getContext('2d'); octx.drawImage(", id, "_ctxlist[", z, "].canvas, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ", 0, 0, ", image_wh, ", ", image_wh, "); ", id, "_ctxlist[", z, "].clearRect(0, 0, ", image_wh, ", ", image_wh, "); ", id, "_ctxlist[", z, "].drawImage(ocv, 0, 0, ", image_wh, ", ", image_wh, ");", panjs)
+                    evaljs(js)
+                }
             }
             for (z in which_are_vector_layers()) {
                 ## also need to replot the vector layers at their scaled sizes
-                iext_mu <- calc_img_ext(idef) ## full canvas extent in map units, e.g. [-2 2 -2 2]e7
-                ## the normalized x and y extents of the existing (unzoomed) vector layer in that canvas extent
-                iext0_mu <- calc_img_ext(idef0)
-                xn <- (iext0_mu[1:2] - iext_mu[1]) / diff(iext_mu[1:2])
-                yn <- 1 - (iext0_mu[3:4] - iext_mu[3]) / diff(iext_mu[3:4]) ## 1 - because we draw from top
-                ## and thus the region in pixels in the canvas for this tile
-                tlp <- c(xn[1], yn[2]) * image_wh
-                brp <- c(xn[2], yn[1]) * image_wh
-                ## redraw the canvas
-                plotid <- paste0(id, "-plot", z)
-                if (!.svg_as_file) {
+                if (TRUE) { ##(!.svg_as_file) {
                     ## redraw from the canvas: draw at zoomed extent to an off-screen canvas then replace the on-screen one
-                    ## TODO? use https://developer.mozilla.org/en-US/docs/Web/API/OffscreenCanvas but note relatively recent support only
-                    js <- paste0("var this_cvs = document.getElementById('", plotid, "'); var offs_cvs = document.createElement('canvas'); offs_cvs.width = '", image_wh, "'; offs_cvs.height = '", image_wh, "'; var offs_ctx = offs_cvs.getContext('2d'); offs_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); offs_ctx.imageSmoothingEnabled = false; offs_ctx.drawImage(this_cvs, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");",
-                                 ## now clear the on-screen one
-                                 "var this_ctx = this_cvs.getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(offs_cvs, 0, 0, ", image_wh, ", ", image_wh, ");")
+                    if (FALSE) {
+                        ## using canvas in DOM
+                        xn <- (iext0_mu[1:2] - iext_mu[1]) / diff(iext_mu[1:2])
+                        yn <- 1 - (iext0_mu[3:4] - iext_mu[3]) / diff(iext_mu[3:4]) ## 1 - because we draw from top
+                        ## and thus the region in pixels in the canvas for this tile
+                        tlp <- c(xn[1], yn[2]) * image_wh
+                        brp <- c(xn[2], yn[1]) * image_wh
+                        plotid <- paste0(id, "-plot", z)
+                        js <- paste0("var this_cvs = document.getElementById('", plotid, "'); var offs_cvs = document.createElement('canvas'); offs_cvs.width = '", image_wh, "'; offs_cvs.height = '", image_wh, "'; var offs_ctx = offs_cvs.getContext('2d'); offs_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); offs_ctx.imageSmoothingEnabled = false; offs_ctx.drawImage(this_cvs, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");",
+                                     ## now clear the on-screen one
+                                     "var this_ctx = this_cvs.getContext('2d'); this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(offs_cvs, 0, 0, ", image_wh, ", ", image_wh, ");")
+                        ## TODO add panjs here
+                    } else {
+                        ## using OffscreenCanvas
+                        ## the normalized x and y extents of the zoomed region in the original/unzoomed canvas
+                        xn <- (iext_mu[1:2] - iext_mu0[1]) / diff(iext_mu0[1:2])
+                        yn <- 1 - (iext_mu[3:4] - iext_mu0[3]) / diff(iext_mu0[3:4])
+                        ## and thus the region in pixels in the unzoomed canvas that we want
+                        tlp <- c(xn[1], yn[2]) * image_wh
+                        brp <- c(xn[2], yn[1]) * image_wh
+                        if (set_pan_on_plot) {
+                            panjs <- get_pan_js()
+                            set_pan_on_plot <<- FALSE # do this for the first raster layer only
+                        }
+#x                    if (local_do_pan) { set_pan(calc_img_offset(idef)); local_do_pan <- FALSE; }
+                        js <- paste0("var ocv = new OffscreenCanvas(", image_wh, ", ", image_wh, "); var octx = ocv.getContext('2d'); octx.drawImage(", id, "_ctxlist[", z, "].canvas, ", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ", 0, 0, ", image_wh, ", ", image_wh, "); ", id, "_ctxlist[", z, "].clearRect(0, 0, ", image_wh, ", ", image_wh, "); ", id, "_ctxlist[", z, "].drawImage(ocv, 0, 0, ", image_wh, ", ", image_wh, ");", panjs)
+                    }
                     evaljs(js)
                 } else {
                     ## redraw from the image file (fast if the browser has cached it)
