@@ -83,7 +83,15 @@ vl_map_ui_postamble <- function() {
 
 #' @export
 #' @rdname vl_map_module
-vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2e7, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) {
+vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2048e4, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) {
+
+    ## initial arg checking
+    iv <- initial_view
+    if (is.null(iv$tiles_per_side)) iv$tiles_per_side <- 1L
+    if (is.null(iv$extent) || is.null(iv$res)) stop("initial_view must contain `extent` and `res` components")
+    if (is.null(iv$max_extent)) iv$max_extent <- iv$extent ## currently ignored
+    initial_view <- iv
+
     .plotres <- 96 ## dpi, only used by png graphics device
     .warp_opts <- c("-wm", "999")
     .resampling_method <- "near"
@@ -274,6 +282,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             } else if (y > 0) {
                 i$xy$y <- i$xy$y + diff(iext[3:4]) / 2
             }
+            ## TODO constrain the limits to the initial_view$max_extent
             image_def(i) ## update the image reactive
             ## ask for pan to be reset when the next plot occurs (don't do it directly here, otherwise we're panning before the re-plot)
             set_pan_on_plot <<- TRUE
@@ -873,6 +882,7 @@ cat("--> in vector layer plotter\n")
             zctr <- c((Nw * idef$w) + initial_view$extent[1], (Nh * idef$h) + initial_view$extent[3]) ## this is the centre of the zoomed extent
             idef$xy$x <- zctr[1] + idef$w * image_def()$xy_grid[, 1]
             idef$xy$y <- zctr[2] + idef$h * image_def()$xy_grid[, 2]
+            ## TODO constrain to max_extent
             image_def(idef)
             ## mxy is where the zoomed view should be centred, but not necessarily the centre of the zoomed image extents
             viewport_ctr(mxy) ## this should do little or nothing if the user clicked the zoom button (because the centre of the current view is taken as the point to centre the zoomed view on), but it will do something if they zoomed to a rectangle
