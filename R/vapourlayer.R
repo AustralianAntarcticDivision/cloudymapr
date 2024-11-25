@@ -39,26 +39,7 @@ vl_map_ui <- function(id, view_wh = c("40vw", "40vh")) {
                   tags$style(paste0("#", id, "-plot", 1:9, " { z-index:-", 9:1, "; }", collapse = " ")), ## plot1 lowest, plot9 top-most
                   tags$style(paste0("#", id, " { width:", view_wh[1], "; height:", view_wh[2], "; }")),
                   singleton(tags$script("$(document).on('shiny:sessioninitialized', function() { Shiny.addCustomMessageHandler('evaljs', function(jsexpr) { eval(jsexpr) }); });")),
-                  tags$script(HTML(paste0("var ", id, "_w_scaling=0; var ", id, "_h_scaling=0; var ", id, "_select_mode='pan';",
-                                          "function ", id, "_m2px(mxy) { return [Math.round(mxy[0] * ", id, "_w_scaling), Math.round(mxy[1] * ", id, "_h_scaling)] };",
-                                          "function ", id, "_px2m(pxy) { return [pxy[0] / ", id, "_w_scaling, pxy[1] / ", id, "_h_scaling] };",
-                                          ## helper function to send the viewport size [w,h] as fraction of window size
-                                          "function ", id, "_vpsz() { return [$('#", id, "').innerWidth() / window.innerWidth, $('#", id, "').innerHeight() / window.innerHeight] };"))),
-                  tags$script(HTML(paste0("$(document).on('shiny:sessioninitialized', function() {
-                                             Pannable(document.querySelector('#", id, "'));
-                                             Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth);
-                                             Shiny.setInputValue('", id, "-view_wh', ", id, "_vpsz());
-                                             $('#", id, "-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [2, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
-                                             $('#", id, "-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [0.5, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
-                                             var ", id, "_w_rsztmr;
-                                             $(window).resize(function() {
-                                               clearTimeout(", id, "_w_rsztmr);
-                                               ", id, "_w_rsztmr = setTimeout(", id, "_w_doneResizing, 500);
-                                             });
-                                             function ", id, "_w_doneResizing() {
-                                               Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth); Shiny.setInputValue('", id, "-view_wh', ", id, "_vpsz());
-                                             }});" ## do we also need to watch the viewport for resizing? Can it be resized independently of the window?
-                                          )))
+                  tags$script(HTML(paste(gsub("$ID$", id, readLines(system.file("extdata/js/vapourlayer.js", package = "cloudymapr"), warn = FALSE, encoding = "UTF-8"), fixed = TRUE), collapse = "\n")))
                   ),
         tags$div(style = "position:relative; margin-top:1px;",
                  tags$div(id = NS(id, "plot_controls"), class = "vl-plot-controls",
@@ -173,8 +154,6 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         view_wh <- reactiveVal(NULL)
         get_viewport_size <- function() {
             ## size in pixels
-            ##cat("window width: ", input$window_width, "\n")
-            ##cat("window height: ", input$window_height, "\n")
             c(if (is.null(input$window_width) || is.null(view_wh()) || isTRUE(input$window_width <= 0)) 800 else round(input$window_width * view_wh()[1]),
               if (is.null(input$window_height) || is.null(view_wh()) || isTRUE(input$window_height <= 0)) 800 else round(input$window_height * view_wh()[2]))
         }
