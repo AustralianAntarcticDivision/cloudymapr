@@ -65,9 +65,8 @@ vl_demo <- function() {
                         checkboxInput("ccamlr_areas", label = "CCAMLR Areas"),
                         tags$hr(),
                         uiOutput("bg_dialog")),
-                 column(10, fluidRow(column(8, style = "overflow-y:hidden; height:65vh;", vl_map_ui("mymap", view_wh = c(40, 60))),
-                                     column(4, DT::dataTableOutput("site_tbl")))##,
-                        )),
+                 column(10, style = "overflow-y:hidden; height:65vh;", vl_map_ui("mymap", view_wh = c(75, 60)))),
+        fluidRow(column(6, offset = 6, DT::dataTableOutput("site_tbl"))),
         vl_map_ui_postamble()
     )
 
