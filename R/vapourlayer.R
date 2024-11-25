@@ -15,7 +15,7 @@ fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, resampling,
 #' Vapourlayer map shiny module
 #'
 #' @param id string: HTML element id
-#' @param view_wh numeric: two-element vector giving the width and height of the map widget as percentages of the browser window width and height
+#' @param view_wh numeric: two-element vector giving the width and height of the map widget as percentages of the browser window width and height in valid css units (e.g. `view_wh = c("400px", "250px")` or `view_wh = c("60vw", "40vh")`
 #' @param image_wh integer: image size in pixels. Depending on the rendering mechanism, the native image size might not actually be this, but the browser will scale to this size
 # @param min_scale scalar: the smallest cell size (in projected units), used when maximally zoomed in
 ## no, min_scale should be determined by the data. Or maybe allow min_scale to be specified but by default it's NA, in which case it falls back to the native data res
@@ -33,30 +33,31 @@ fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, resampling,
 #'
 #' @export
 #' @rdname vl_map_module
-vl_map_ui <- function(id, view_wh = c(40, 40)) {
+vl_map_ui <- function(id, view_wh = c("40vw", "40vh")) {
     tagList(
         tags$head(singleton(htmltools::includeCSS(system.file("extdata/css/vapourlayer.css", package = "cloudymapr"))),
-                  ## .viewport>* { transform-origin: 0 0; max-width:", view_wh[1], "vw; }
                   tags$style(paste0("#", id, "-plot", 1:9, " { z-index:-", 9:1, "; }", collapse = " ")), ## plot1 lowest, plot9 top-most
-                  tags$style(paste0("#", id, " { width:", view_wh[1], "vw; height:", view_wh[2], "vh; }")),
+                  tags$style(paste0("#", id, " { width:", view_wh[1], "; height:", view_wh[2], "; }")),
                   singleton(tags$script("$(document).on('shiny:sessioninitialized', function() { Shiny.addCustomMessageHandler('evaljs', function(jsexpr) { eval(jsexpr) }); });")),
                   tags$script(HTML(paste0("var ", id, "_w_scaling=0; var ", id, "_h_scaling=0; var ", id, "_select_mode='pan';",
-                                          "function ", id, "_m2px(mxy) { return [Math.round(mxy[0] * ", id, "_w_scaling), Math.round(mxy[1] * ", id, "_h_scaling)] }; ",
-                                          "function ", id, "_px2m(pxy) { return [pxy[0] / ", id, "_w_scaling, pxy[1] / ", id, "_h_scaling] };"))),
+                                          "function ", id, "_m2px(mxy) { return [Math.round(mxy[0] * ", id, "_w_scaling), Math.round(mxy[1] * ", id, "_h_scaling)] };",
+                                          "function ", id, "_px2m(pxy) { return [pxy[0] / ", id, "_w_scaling, pxy[1] / ", id, "_h_scaling] };",
+                                          ## helper function to send the viewport size [w,h] as fraction of window size
+                                          "function ", id, "_vpsz() { return [$('#", id, "').innerWidth() / window.innerWidth, $('#", id, "').innerHeight() / window.innerHeight] };"))),
                   tags$script(HTML(paste0("$(document).on('shiny:sessioninitialized', function() {
                                              Pannable(document.querySelector('#", id, "'));
                                              Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth);
-                                             Shiny.setInputValue('", id, "-view_wh', '", paste0(view_wh, collapse = ","), "');
+                                             Shiny.setInputValue('", id, "-view_wh', ", id, "_vpsz());
                                              $('#", id, "-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [2, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
                                              $('#", id, "-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); Shiny.setInputValue('", id, "-do_zoom', [0.5, -parseInt($('#", id, "-pannable').css('left')), -parseInt($('#", id, "-pannable').css('top'))], { priority: 'event' }); });
-                                             var ", id, "_br_rsztmr;
+                                             var ", id, "_w_rsztmr;
                                              $(window).resize(function() {
-                                               clearTimeout(", id, "_br_rsztmr);
-                                               ", id, "_br_rsztmr = setTimeout(", id, "_br_doneResizing, 500);
+                                               clearTimeout(", id, "_w_rsztmr);
+                                               ", id, "_w_rsztmr = setTimeout(", id, "_w_doneResizing, 500);
                                              });
-                                             function ", id, "_br_doneResizing() {
-                                               Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth);
-                                             }});"
+                                             function ", id, "_w_doneResizing() {
+                                               Shiny.setInputValue('", id, "-window_height', window.innerHeight); Shiny.setInputValue('", id, "-window_width', window.innerWidth); Shiny.setInputValue('", id, "-view_wh', ", id, "_vpsz());
+                                             }});" ## do we also need to watch the viewport for resizing? Can it be resized independently of the window?
                                           )))
                   ),
         tags$div(style = "position:relative; margin-top:1px;",
@@ -66,7 +67,7 @@ vl_map_ui <- function(id, view_wh = c(40, 40)) {
                           actionButton(NS(id, "pan_button"), class = "btn btn-default", label = icon("hand", id = NS(id, "pan-icon")), title = "Pan map"),
                           actionButton(NS(id, "select_button"), class = "btn btn-default", label = icon("object-group", id = NS(id, "select-icon"), class = "icon-disabled"), title = "Select region")
                           ),
-                 tags$div(id = id, class = "viewport", `data-wh` = paste0(view_wh, collapse = ","),
+                 tags$div(id = id, class = "viewport",
                           tags$canvas(id = NS(id, "canvas"), class = "viewport-canvas"), ## used for the panning, rectangle-dragging, etc
                           do.call(tags$div, c(list(id = NS(id, "pannable"), class = "viewport-pannable"),
                                               lapply(9:1, function(z) tags$canvas(id = NS(id, paste0("plot", z)), class = "viewport-image"))))
@@ -78,7 +79,7 @@ vl_map_ui <- function(id, view_wh = c(40, 40)) {
 #' @export
 #' @rdname vl_map_module
 vl_map_ui_postamble <- function() {
-    htmltools::includeScript(system.file("extdata/js/vapourlayer.js", package = "cloudymapr"))
+    htmltools::includeScript(system.file("extdata/js/vapourlayer-post.js", package = "cloudymapr"))
 }
 
 #' @export
@@ -174,8 +175,8 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
             ## size in pixels
             ##cat("window width: ", input$window_width, "\n")
             ##cat("window height: ", input$window_height, "\n")
-            c(if (is.null(input$window_width) || is.null(view_wh()) || isTRUE(input$window_width <= 0)) 800 else round(input$window_width * view_wh()[1] / 100),
-              if (is.null(input$window_height) || is.null(view_wh()) || isTRUE(input$window_height <= 0)) 800 else round(input$window_height * view_wh()[2] / 100))
+            c(if (is.null(input$window_width) || is.null(view_wh()) || isTRUE(input$window_width <= 0)) 800 else round(input$window_width * view_wh()[1]),
+              if (is.null(input$window_height) || is.null(view_wh()) || isTRUE(input$window_height <= 0)) 800 else round(input$window_height * view_wh()[2]))
         }
 
         calc_img_ext <- function(idef) c(min(idef$xy$x - idef$w / 2), max(idef$xy$x + idef$w / 2), min(idef$xy$y - idef$h / 2), max(idef$xy$y + idef$h / 2))
@@ -453,14 +454,7 @@ cat("--> in update_tiles_data()\n")
             ## get the viewport width and height via js (this means that we only need to specify view_wh in the ui call, not the server as well)
             cat("checking view_wh\n")
             cat("input$view_wh is:", utils::capture.output(utils::str(input$view_wh)), "\n")
-            if (is.null(input$view_wh)) {
-                ## needed? should be fired by the browser js when the sessioninitialized code runs
-                ## cat("triggering input$view_wh update\n")
-                ## evaljs("Shiny.setInputValue('",id, "-view_wh', $('#", id, "').attr('data-wh'));")
-                ## ## shiny::invalidateLater(250)
-            } else {
-                view_wh(as.numeric(strsplit(input$view_wh, ",")[[1]]))
-            }
+            if (!is.null(input$view_wh)) view_wh(input$view_wh)
         })
 
         init_offset <- FALSE
