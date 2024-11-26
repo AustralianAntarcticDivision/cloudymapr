@@ -27,7 +27,11 @@ fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, resampling,
 #' @param target_crs string: target projection CRS string
 #' @param cache logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a `cachem` object (as returned by e.g. [cachem::cache_mem()])
 #'
-#' @return The UI and server components of a Shiny module
+#' @return The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
+#' * click function:
+#' * get_viewport_size function:
+#' * viewport_ctr function:
+#' * layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a `terra::rast` object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
 #'
 # @examples
 #'
@@ -192,7 +196,37 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
         }
 
         check_extent_trigger <- reactiveVal(0L)
-        tiles_data <- reactiveVal(rep(list(list(img = NULL)), 9))
+        tiles_data <- reactiveVal(rep(list(list(img = NULL)), 9)) ## the tiles as fetched with gdal
+        layer_data <- lapply(1:9, function(z) {
+            reactive({
+                if (isTRUE(isolate(layerdef()[[z]])$type %in% c("raster_data", "raster_image_grey"))) {
+                    terra::rast(tiles_to_matrix(tiles_data()[[z]]$img$data), crs = target_crs, extent = calc_img_ext(image_def()))
+                } else {
+                    ## TODO other image types. RGB should be able to return RGB colours as a 3-band raster
+                    NULL
+                }
+            })
+        })
+
+        tiles_to_matrix <- function(td_img_data) {
+            tdim <- Filter(Negate(is.null), lapply(td_img_data, attr, "dimension"))
+            tdim <- if (length(tdim) > 0) tdim[[1]] else return(NULL) ## if we have no dimension, we can't build the matrix
+            m1 <- function(z) matrix(if (is.null(z)) NA_real_ else if (is.raw(z)) as.integer(z) else z, nrow = tdim[2], ncol = tdim[1], byrow = TRUE) ## matrix constructor
+            idef <- isolate(image_def())
+            n <- idef$tiles_per_side ## image is composed of a square arrangement of tiles (which may be only one tile)
+            ord <- order(idef$xy$x, -idef$xy$y) ## tile ordering
+            if (.debug > 1) temp <- proc.time()["elapsed"]
+            out <- do.call(cbind, lapply(seq_len(n), function(ci) {
+                do.call(rbind, lapply((ci - 1) * n + seq_len(n), function(ri) {
+                    m1(td_img_data[[ord[ri]]][[1]])
+                }))
+            }))
+            if (.debug > 1) {
+                temp <- proc.time()["elapsed"] - temp
+                message("data matrix assembly time: ", round(temp, 3), "s")
+            }
+            out
+        }
 
         get_pan_js <- function(pxy) {
             if (missing(pxy)) pxy <- isolate(calc_img_offset(image_def()))
@@ -328,7 +362,7 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                     mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs)## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
                     if (.debug > 2) {
                         temp <- proc.time()["elapsed"] - temp
-                        message("mirai dispatch time time: ", round(temp, 3), "s")
+                        message("mirai dispatch time: ", round(temp, 3), "s")
                     }
                     if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
                 }
@@ -988,6 +1022,6 @@ cat("--> in vector layer plotter\n")
             }
         })
 
-        list(click = mapclick, get_viewport_size = get_viewport_size, viewport_ctr = viewport_ctr)
+        list(click = mapclick, get_viewport_size = get_viewport_size, viewport_ctr = viewport_ctr, layer_data = layer_data)
     })
 }

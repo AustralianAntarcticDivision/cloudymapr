@@ -30,6 +30,7 @@ Imports:
   sds,
   sf,
   shiny,
+  terra,
   tibble,
   unigd (>= 0.1.2),
   uuid,

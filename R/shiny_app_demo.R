@@ -66,7 +66,8 @@ vl_demo <- function() {
                         tags$hr(),
                         uiOutput("bg_dialog")),
                  column(10, style = "overflow-y:hidden; height:65vh;", vl_map_ui("mymap", view_wh = c("75vw", "60vh")))),
-        fluidRow(column(6, offset = 6, DT::dataTableOutput("site_tbl"))),
+        fluidRow(column(4, offset = 2, uiOutput("data_value")),
+                 column(6, tags$p(tags$strong("Data values at site nearest to click point:")), DT::dataTableOutput("site_tbl"))),
         vl_map_ui_postamble()
     )
 
@@ -116,6 +117,19 @@ vl_demo <- function() {
                 temp <- tibble(Variable = names(temp), Value = unlist(temp))
                 dt_opts <- list(sDom = '<"top">t<"bottom">r')##, ## filters and paging options, no i, p, or l
                 DT::datatable(temp, rownames = FALSE, options = dt_opts, selection = "none", filter = "none", class = "display")
+            })
+            ## and extract data at click point
+            dat <- vl_obj$layer_data[[1]]()
+            val <- if (!is.null(dat)) tryCatch(terra::extract(dat, matrix(vl_obj$click(), byrow = TRUE, ncol = 2)), error = function(e) NA) else NULL
+            output$data_value <- renderUI({
+                wellPanel(tags$p(tags$strong("Data value at exact (clicked) location:")),
+                          tags$p(if (is.null(val)) {
+                                     "no data available for the active layer"
+                                 } else if (is.na(val)) {
+                                     "data extraction failed for the active layer"
+                                 } else {
+                                     val
+                                 }))
             })
         })
     }
