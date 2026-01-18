@@ -11,50 +11,172 @@ const Pannable = (elViewport) => {
         ev.preventDefault();
         var rect = elViewport.getBoundingClientRect();
         if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
-	    // click was inside viewport bounds
+            // click was inside viewport bounds
             var id = elViewport.getAttribute('id');
-            var selmode = window[id + '_select_mode']; // yuck
+            var selmode = window['cm_' + id + '.select_mode'];
             isPan = true;
             didPan = false;
-	    if (selmode === 'select') {
-	        var vprect = elViewport.getBoundingClientRect();
-	        ctx.canvas.height = vprect.height;
-	        ctx.canvas.width = vprect.width;
-	        //if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
-	        // click inside the viewport bounds
-	        console.log(vprect);
-	        console.log([ev.clientX, ev.clientY]);
-	        console.log([ev.pageX, ev.pageY]);
-	        var x = ev.clientX - vprect.left;
-	        var y = ev.clientY - vprect.top;
-	        dragrect.startX = x;
-	        dragrect.startY = y;
-	    }
-	}
+            if (selmode === 'select') {
+                var vprect = elViewport.getBoundingClientRect();
+                ctx.canvas.height = vprect.height;
+                ctx.canvas.width = vprect.width;
+                //if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
+                // click inside the viewport bounds
+                console.log(vprect);
+                console.log([ev.clientX, ev.clientY]);
+                console.log([ev.pageX, ev.pageY]);
+                var x = ev.clientX - vprect.left;
+                var y = ev.clientY - vprect.top;
+                dragrect.startX = x;
+                dragrect.startY = y;
+            }
+        }
     };
 
     const panMove = (ev) => {
         if (!isPan) return;
         var id = elViewport.getAttribute('id');
-        var selmode = window[id + '_select_mode']; // yuck
+        var cm = window['cm_' + id];
         if (Math.abs(ev.movementX) > 0 || Math.abs(ev.movementY) > 0) { didPan = true; }
-//TR        const elImg = elViewport.children[1];
-	if (selmode === 'pan') {
-            var px2m = window[id + '_px2m']; // yuck
-	    for (var ch of elViewport.getElementsByClassName('viewport-pannable')) {
-		var new_t = ch.offsetTop + ev.movementY;
-		var new_l = ch.offsetLeft + ev.movementX;
-	    //TRNS var trns = window.getComputedStyle(ch).translate.replace(/[^0-9\-., ]/g, '').split(' ');
-	    //TRNS console.log('trns: ' + trns);
-	    //TRNS var new_l = Number(trns[0]) + ev.movementX;
-	    //TRNS var new_t = Number(trns[1]) + ev.movementY;
-//		console.log('pan: ' + new_l + ', ' + new_t);
-                ch.style.top = new_t + 'px'; ch.style.left = new_l + 'px';
-//TR                ch.style.transform = 'translate(' + new_l + 'px,' + new_t + 'px)';
+        if (cm.select_mode === 'pan') {
+//PP            var ch = elViewport.getElementsByClassName('viewport-pannable'); // there should be one element here
+            var ch = $("#" + id + "-pannable canvas"); // all child canvas elements
+//NOPV            var ch = $("#" + id + " .viewport-image"); // all child canvas elements
+            if (ch.length > 0) {
+                //PP var mvx = ev.movementX; var mvy = ev.movementY; // if panning the viewport. positive X means moving leftwards
+                var mvx = ev.movementX; var mvy = ev.movementY; // if panning the layers
+                console.log('pan mX: ' + mvx + ', mY:' + mvy);
+/*                var new_t = ch[0].offsetTop + mvy;
+                var new_l = ch[0].offsetLeft + mvx;
+                //console.log('pan lt: ' + new_l + ', ' + new_t);
+                var vpext_mu = cm.vpext_mu(new_l, new_t); // what the new viewport extent would be with the pan applied, in map units
+                // check that it won't go beyond the allowable max extent, but must allow e.g. left-pan if we are too far right
+//                TODO check that we don't have to do the x/y checks independently here
+*/
+                var vpext_mu = cm.vpext_mu();
+                console.log("pan: start vpext_mu is " + vpext_mu);
+                vpext_mu[0] = vpext_mu[0] - mvx * cm.xsc;
+                vpext_mu[1] = vpext_mu[1] - mvx * cm.xsc;
+                vpext_mu[2] = vpext_mu[2] + mvy * cm.ysc;
+                vpext_mu[3] = vpext_mu[3] + mvy * cm.ysc;
+                console.log("pan: with move vpext_mu is " + vpext_mu);
+
+                var extend = false; // need to extend the data?
+                var panx = false; var pany = false; // allow the pan? (not beyond allowable extent)
+                var dx = (cm.ext[1] - cm.ext[0]) / 2;
+                var dy = (cm.ext[3] - cm.ext[2]) / 2;
+                var newext = cm.ext.map((x) => x); // clone the ext
+                if (mvx > 0) {
+                    console.log("pan left");
+                    // leftwards movement
+                    if (vpext_mu[0] >= cm.ext0[0]) {
+                        console.log("ok");
+                        // not beyond allowable extent
+                        panx = true;
+                        if (vpext_mu[0] < cm.ext[0]) {
+                            console.log("extend");
+                            // beyond current data extent, extend
+                            newext[0] = newext[0] - dx;
+                            newext[1] = newext[1] - dx;
+                            extend = true;
+                        }
+                    }
+                } else if (mvx < 0) {
+                    if (vpext_mu[1] <= cm.ext0[1]) {
+                        // not beyond allowable extent
+                        panx = true;
+                        if (vpext_mu[1] > cm.ext[1]) {
+                            // beyond current data extent, extend
+                            newext[0] = newext[0] + dx;
+                            newext[1] = newext[1] + dx;
+                            extend = true;
+                        }
+                    }
+                }
+                if (mvy < 0) {
+                    // downwards movement
+                    console.log("pan down");
+                    if (vpext_mu[2] >= cm.ext0[2]) {
+                        console.log("ok");
+                        pany = true;
+                        if (vpext_mu[2] < cm.ext[2]) {
+                            console.log("extend");
+                            newext[2] = newext[2] - dy;
+                            newext[3] = newext[3] - dy;
+                            extend = true;
+                        }
+                    }
+                } else if (mvy > 0) {
+                    console.log("pan up");
+                    if (vpext_mu[3] <= cm.ext0[3]) {
+                        console.log("ok");
+                        pany = true;
+                        if (vpext_mu[3] > cm.ext[3]) {
+                            console.log("extend");
+                            newext[2] = newext[2] + dy;
+                            newext[3] = newext[3] + dy;
+                            extend = true;
+                        }
+                    }
+                }
+
+/* old TODO delete
+                if ((vpext_mu[0] >= cm.ext0[0] || (vpext_mu[0] < cm.ext0[0] && mvx < 0)) &&
+                    (vpext_mu[1] <= cm.ext0[1] || (vpext_mu[1] > cm.ext0[1] && mvx > 0)) &&
+                    (vpext_mu[2] >= cm.ext0[2] || (vpext_mu[2] < cm.ext0[2] && mvy < 0)) &&
+                    (vpext_mu[3] <= cm.ext0[3] || (vpext_mu[3] > cm.ext0[3] && mvy > 0))) {
+                    ch[0].style.top = new_t + 'px'; ch[0].style.left = new_l + 'px';
+                    // do we need to extend the image data? (Have we panned beyond the current map extent?)
+                    // l,t is the left-top of the image under the viewport
+                    // var vpext_mu = cm.vpext_mu(); // viewport extent, but don't need to recalc it
+                    if (vpext_mu[0] < cm.ext[0]) {
+                        // console.log('extend left');
+                    } else if (vpext_mu[1] > cm.ext[1]) {
+                        // console.log('extend right');
+                        newext[0] = newext[0] + dx;
+                        newext[1] = newext[1] + dx;
+                        pan = true;
+                    }
+                    if (vpext_mu[3] > cm.ext[3]) {
+                        // console.log('extend top');
+                        newext[2] = newext[2] + dy;
+                        newext[3] = newext[3] + dy;
+                        pan = true;
+                    } else if (vpext_mu[2] < cm.ext[2]) {
+                        // console.log('extend bottom');
+                        newext[2] = newext[2] - dy;
+                        newext[3] = newext[3] - dy;
+                        pan = true;
+                    }
+                    // Shiny.setInputValue(id + '-pan_mxy', cm.px2m([mvx, mvy]), { priority: 'event' });
+                    if (pan) {
+                        console.log('pan extend: ' + newext);
+                        Shiny.setInputValue(id + '-pan_extend', newext);
+                    }
+              } */
+
+                if (panx || pany) {
+                    if (panx) { cm.viewport_ctr[0] = cm.viewport_ctr[0] - mvx * cm.xsc / cm.zoom_level; }
+                    if (pany) { cm.viewport_ctr[1] = cm.viewport_ctr[1] + mvy * cm.ysc / cm.zoom_level; }
+                    ch.each( function(idx, el) {
+                        var l = parseInt($(this).css("left"), 10);
+                        var t = parseInt($(this).css("top"), 10);
+                        if (panx && pany) {
+                            $(this).css({ "left": l + mvx, "top": t + mvy });
+                        } else if (panx) {
+                            $(this).css("left", l + mvx);
+                        } else {
+                            $(this).css("top", t + mvy);
+                        }
+                    });
+                    if (extend) {
+                        // TODO should the panned extent be set now?
+                        Shiny.setInputValue(id + '-pan_extend', newext.concat([(vpext_mu[0] + vpext_mu[1]) / 2, (vpext_mu[2] + vpext_mu[3]) / 2]));
+                    }
+                }
             }
-            Shiny.setInputValue(id + '-pan_mxy', px2m([ev.movementX, ev.movementY]), { priority: 'event' });
-	} else {
-            // TODO if the drag goes beyond the viewport bounds, pan it
+        } else {
+            // TODO if the drag goes beyond the viewport bounds, pan it, but not beyond the max allowable extent
             var vprect = elViewport.getBoundingClientRect();
             ctx.clearRect(0, 0, vprect.width, vprect.height);
             ctx.fillStyle = '#00008080';
@@ -65,8 +187,8 @@ const Pannable = (elViewport) => {
             ctx.strokeStyle = '#000080';
             ctx.fillRect(dragrect.startX, dragrect.startY, dragrect.w, dragrect.h);
             ctx.strokeRect(dragrect.startX, dragrect.startY, dragrect.w, dragrect.h);
-	    //console.log([dragrect.startX, dragrect.startY, dragrect.w, dragrect.h]);
-	}
+            //console.log([dragrect.startX, dragrect.startY, dragrect.w, dragrect.h]);
+        }
     };
 
     const panEnd = (ev) => {
@@ -82,18 +204,18 @@ const Pannable = (elViewport) => {
                 Shiny.setInputValue(id + '-mapclick', [x, y, event.button], { priority: 'event' }); // coords of click, in pixels relative to viewport
             }
         } else {
-            var selmode = window[id + '_select_mode']; // yuck
-	    if (selmode === 'select') {
-		// clear rectangle from canvas and send selection to server
-		var selrect = dragrect;
-		var vprect = elViewport.getBoundingClientRect();
-		ctx.clearRect(0, 0, vprect.width, vprect.height);
-		selrect.startY = vprect.height - selrect.startY; // zero at bottom, not top
-		selrect.endX = selrect.startX + selrect.w;
-		selrect.endY = selrect.startY - selrect.h;
-		Shiny.setInputValue(id + '-dragselect', [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)]); // rectangle in pixels relative to viewport
-		dragrect = {};
-	    }
+            var cm = window['cm_' + id];
+            if (cm.select_mode === 'select') {
+                // clear rectangle from canvas and send selection to server
+                var selrect = dragrect;
+                var vprect = elViewport.getBoundingClientRect();
+                ctx.clearRect(0, 0, vprect.width, vprect.height);
+                selrect.startY = vprect.height - selrect.startY; // zero at bottom, not top
+                selrect.endX = selrect.startX + selrect.w;
+                selrect.endY = selrect.startY - selrect.h;
+                Shiny.setInputValue(id + '-dragselect', [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)]); // rectangle in pixels relative to viewport
+                dragrect = {};
+            }
         }
     };
 

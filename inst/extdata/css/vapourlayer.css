@@ -8,7 +8,7 @@
     background-color: transparent; color: #000;
 }
 .viewport-pannable, .viewport-image, .viewport-canvas { position:absolute; } .viewport-canvas { z-index:99; }
-.viewport-image, .viewport-canvas { left:0; top:0; } /*transform-origin:top left; } */
+.viewport-image, .viewport-canvas { left:0; top:0; image-rendering:pixelated; }
 .vl-plot-controls { width:40px; position:relative; z-index:99; }
 .vl-plot-controls shiny-input-container { margin-top: 20px; }
 .vl-plot-controls button { padding:0; font-size:32px; height:32px; width:32px; background-color:#FFFFFF00; border:none; }

@@ -38,7 +38,7 @@ vl_demo <- function() {
 
     ## metadata about the raster layers to show in the app
     raster_meta <- tribble(~name, ~citation, ~details,
-                           "EO Basemap", tags$span("NASA Earth Observatory map by Joshua Stevens using data from NASA’s MODIS Land Cover, the Shuttle Radar Topography Mission (SRTM), the General Bathymetric Chart of the Oceans (GEBCO), and Natural Earth boundaries.", tags$a(href = "https://visibleearth.nasa.gov/images/147190/explorer-base-map", "https://visibleearth.nasa.gov/images/147190/explorer-base-map")), "An RGB COG (geotiff) in long-lat projection, served by a standard web server and reprojected on the fly",
+                           "EO Basemap", tags$span("NASA Earth Observatory map by Joshua Stevens using data from NASA's MODIS Land Cover, the Shuttle Radar Topography Mission (SRTM), the General Bathymetric Chart of the Oceans (GEBCO), and Natural Earth boundaries.", tags$a(href = "https://visibleearth.nasa.gov/images/147190/explorer-base-map", "https://visibleearth.nasa.gov/images/147190/explorer-base-map")), "An RGB COG (geotiff) in long-lat projection, served by a standard web server and reprojected on the fly",
                            "ESRI Basemap", tags$span("ESRI World Imagery basemap.", tags$a(href = "https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9", "https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9")), "ESRI's World Imagery basemap, which is RGB imagery served through a web map tile server",
                            "BAS Basemap", tags$span("Basemap of Antarctic and Southern Ocean combining hillshade and bathymetry by the British Antarctic Survey.", tags$a(href = "https://www.arcgis.com/home/item.html?id=435e23642bf94b83b07d1d3fc0c5c9d5", "https://www.arcgis.com/home/item.html?id=435e23642bf94b83b07d1d3fc0c5c9d5")), "RGB image tiles in polar stereographic projection, served by a web map server",
                            "REMA Hillshade", tags$span("Reference Elevation Model of Antarctica v2.", tags$a(href = "https://doi.org/10.7910/DVN/EBW8UC", "https://doi.org/10.7910/DVN/EBW8UC")), "Greyscale COG (geotiff) in polar stereographic projection, served by a standard web server. Rendered to greyscale image with transparency",
@@ -75,17 +75,17 @@ vl_demo <- function() {
         layerdef <- reactive({
             bg <- if (is.null(input$bg) || !input$bg %in% raster_cat$name) raster_cat[raster_cat$name == "EO Basemap", ] else raster_cat[raster_cat$name == input$bg, ]
             list(bg %>% mutate(z = 1L), ## raster layer using inbuilt renderer
-                 list(fun = function(xlim, ylim) { ## custom layer using own plot function
+                 list(fun = function(xlim, ylim, zoom) { ## custom layer using own plot function
                      if (isTRUE(input$cst)) {
                          plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
-                         plot(cst, border = "black", col = NA, add = TRUE, xlim = xlim, ylim = ylim)
+                         plot(cst, border = "black", col = NA, add = TRUE, xlim = xlim, ylim = ylim, lwd = 1)
                          points(sx$X, sx$Y, pch = 21, bg = "green")
                          TRUE
                      } else {
                          FALSE
                      }
                  }, z = 2),
-                 list(fun = function(xlim, ylim) { ## custom layer using own plot function
+                 list(fun = function(xlim, ylim, zoom) { ## custom layer using own plot function
                      if (isTRUE(input$ccamlr_areas)) {
                          plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
                          plot(ccamlr_areas, border = "blue", col = NA, add = TRUE, xlim = xlim, ylim = ylim)
@@ -97,8 +97,6 @@ vl_demo <- function() {
                  )
         })
 
-        vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj, initial_view = list(tiles_per_side = 2L, extent = c(-1, 1, -1, 1) * 2048e4, res = 32e3))
-
         ## raster metadata
         output$bg_dialog <- renderUI({
             req(input$bg)
@@ -106,32 +104,34 @@ vl_demo <- function() {
             if (length(idx) == 1) tags$p("Background imagery:", raster_meta$citation[idx][[1]]) else NULL
         })
 
-        ## handle click events
-        observeEvent(vl_obj$click(), {
-            req(vl_obj$click())
-            idx <- which.min(abs(sx$X - vl_obj$click()[1]) + abs(sx$Y - vl_obj$click()[2]))
-            ## TODO fix this, it's just snapping to the nearest data point, which might be a long way from the click
-            output$site_tbl <- DT::renderDataTable({
-                tbl_cols <- setdiff(names(sx), c("X", "Y", "geometry"))
-                temp <- as.data.frame(sx[idx, ])[, tbl_cols] %>% mutate(across(everything(), function(z) as.character(if (is.numeric(z)) round(z, 3) else z)))
-                temp <- tibble(Variable = names(temp), Value = unlist(temp))
-                dt_opts <- list(sDom = '<"top">t<"bottom">r')##, ## filters and paging options, no i, p, or l
-                DT::datatable(temp, rownames = FALSE, options = dt_opts, selection = "none", filter = "none", class = "display")
-            })
-            ## and extract data at click point
-            dat <- vl_obj$layer_data[[1]]()
-            val <- if (!is.null(dat)) tryCatch(terra::extract(dat, matrix(vl_obj$click(), byrow = TRUE, ncol = 2)), error = function(e) NA) else NULL
-            output$data_value <- renderUI({
-                wellPanel(tags$p(tags$strong("Data value at exact (clicked) location:")),
-                          tags$p(if (is.null(val)) {
-                                     "no data available for the active layer"
-                                 } else if (is.na(val)) {
-                                     "data extraction failed for the active layer"
-                                 } else {
-                                     val
-                                 }))
-            })
-        })
+        vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj, initial_view = list(tiles_per_side = 2L, extent = c(-1, 1, -1, 1) * 2048e4, res = 32e3))
+
+##        ## handle click events
+##        observeEvent(vl_obj$click(), {
+##            req(vl_obj$click())
+##            idx <- which.min(abs(sx$X - vl_obj$click()[1]) + abs(sx$Y - vl_obj$click()[2]))
+##            ## TODO fix this, it's just snapping to the nearest data point, which might be a long way from the click
+##            output$site_tbl <- DT::renderDataTable({
+##                tbl_cols <- setdiff(names(sx), c("X", "Y", "geometry"))
+##                temp <- as.data.frame(sx[idx, ])[, tbl_cols] %>% mutate(across(everything(), function(z) as.character(if (is.numeric(z)) round(z, 3) else z)))
+##                temp <- tibble(Variable = names(temp), Value = unlist(temp))
+##                dt_opts <- list(sDom = '<"top">t<"bottom">r')##, ## filters and paging options, no i, p, or l
+##                DT::datatable(temp, rownames = FALSE, options = dt_opts, selection = "none", filter = "none", class = "display")
+##            })
+##            ## and extract data at click point
+##            dat <- vl_obj$layer_data[[1]]()
+##            val <- if (!is.null(dat)) tryCatch(terra::extract(dat, matrix(vl_obj$click(), byrow = TRUE, ncol = 2)), error = function(e) NA) else NULL
+##            output$data_value <- renderUI({
+##                wellPanel(tags$p(tags$strong("Data value at exact (clicked) location:")),
+##                          tags$p(if (is.null(val)) {
+##                                     "no data available for the active layer"
+##                                 } else if (is.na(val)) {
+##                                     "data extraction failed for the active layer"
+##                                 } else {
+##                                     val
+##                                 }))
+##            })
+##        })
     }
 
     shinyApp(ui, server)

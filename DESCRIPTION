@@ -16,7 +16,6 @@ Imports:
   abind,
   base64enc,
   cachem,
-  digest,
   dplyr,
   DT,
   fastpng,
@@ -36,7 +35,7 @@ Imports:
   uuid,
   vapour,
   ximage
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.2
 X-schema.org-applicationCategory: Antarctic/Southern Ocean
 X-schema.org-keywords: Antarctic, Southern Ocean, mapping
 X-schema.org-isPartOf: https://antarctica.gov.au, https://scar.org
