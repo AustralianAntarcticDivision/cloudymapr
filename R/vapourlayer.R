@@ -382,11 +382,11 @@ vl_map_server <- function(id, image_wh = 3200, initial_view = list(tiles_per_sid
                         result <- job$data
                         done <- c(done, ji)
                         if (.debug > 2) message("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
-                        if (is.null(result$err)) {
+                        if (!mirai::is_mirai_error(result)) {
                             if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
                         } else {
-                            cat("async data failed: ", conditionMessage(result$err), "\n")
+                            cat("async data failed: ", result, "\n")
                         }
                     }
                 }
@@ -582,7 +582,7 @@ cat("--> in update_tiles_data()\n")
         tile_to_png <- function(...) {
             keydata <- list(...)
             if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
-            keydata$td <- keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
+            keydata$td <- if (keydata$i > length(keydata$td$img$data)) NULL else keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
             keydata$i <- NULL ## so that if we ask for a tile in slot N that was previously in slot M, the cached copy can be used
             key <- rlang::hash(keydata)
             ## cat("key:", key, "\n")
@@ -598,7 +598,7 @@ cat("--> in update_tiles_data()\n")
         }
 
         tile_to_png_inner <- function(td, i, layerdef, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory) {
-            if (is.null(td$img$data[[i]][[1]])) return(NULL)
+            if (i > length(td$img$data) || is.null(td$img$data[[i]][[1]])) return(NULL)
             pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
             message("rendering raster tile to png:", pltf)
             if (use_fastpng) {
