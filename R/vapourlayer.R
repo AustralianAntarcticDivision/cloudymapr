@@ -84,7 +84,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
     .warp_opts <- c("-wm", "999")
     .resampling_method <- "near"
     ## .resampling_method <- "bilinear" ## TODO allow this to be specified on a source-by-source basis. Be aware that bilinear sampling can cause issues when the source is raster_data and it has special values like a land mask (255) but valid values are (say) 0-100: interpolation near land will give values > 100 and < 255
-    .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing?
+    .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing? TODO remove
     .clear_on_pan <- FALSE ## clear plots on pan? Or leave them visible while refreshing?
 
     ## initial arg checking
@@ -187,6 +187,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         observeEvent(input$request_init, {
             extstr <- paste0("[", initial_view$extent[1], ",", initial_view$extent[2], ",", initial_view$extent[3], ",", initial_view$extent[4], "];")
             ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];")
+            alstr <- paste0("[", paste(sapply(layerdef(), function(w) w$z), collapse = ","), "];") ## active layers, 1-indexed
             ## TODO allow centre to be specifed as something else?
             evaljs(paste0("cm_", id, ".xsc=", diff(initial_view$extent[1:2]) / image_wh, ";",
                           "cm_", id, ".ysc=", diff(initial_view$extent[3:4]) / image_wh, ";",
@@ -195,6 +196,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                           "cm_", id, ".image_wh=", image_wh, ";",
                           "cm_", id, ".res=", initial_view$res, ";",
                           "cm_", id, ".viewport_ctr=", ctrstr,
+                          "cm_", id, ".active_layers=", alstr,
                           "cm_", id, ".ext=", extstr, "cm_", id, ".ext0=", extstr
                           ))
             init_done <<- TRUE
@@ -239,7 +241,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             i$zoom <- input$do_zoom[6]
             cat("idef:", str(i), "\n")
             image_def(i)
-            recentre_on_plot <<- input$do_zoom[7:8]
         })
 
         observeEvent(input$pan_extend, {
@@ -257,7 +258,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             set_pan_on_plot <<- TRUE
         })
 
-        recentre_on_plot <- NULL
         set_pan_on_plot <- FALSE ## if this is set to TRUE by the calling code (somewhere in the chain before this function is called) the viewport will be re-panned as part of the plot drawing TODO send that re-pan request to the client, or send it as a delta on the current pan
         send_plot <- function(plot_contents, plotnum, image_def, ext_mu, clear = .clear_canvas_before_drawing, as = "file") { ## x = 0, y = 0, w = image_wh, h = image_wh, 
             ## send_plot is used for vector layers, not tiled layers (see draw_tile for those)
@@ -439,14 +439,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 
         ## draw image on a canvas (and return the js string). If `do_eval` is FALSE, just return the string
         image_js <- function(z, ext_mu, panjs, plot_contents, image_def = 1, clear = TRUE, do_eval = TRUE) {
-            js <- ""
-            if (!is.null(recentre_on_plot)) {
-                ## TODO this client-side
-                cat("RECENTRE: ", recentre_on_plot, "\n")
-                js <- paste0("cm_", id, ".set_vpctr_mu([", recentre_on_plot[1], ", ", recentre_on_plot[2], "]);")
-                recentre_on_plot <<- NULL
-            }
-            js <- paste0(js, "var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
+            js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
                          ## old "var tl = cm_", id, ".m2px([", ext_mu[1], ", ", ext_mu[4], "], true); var br = cm_", id, ".m2px([", ext_mu[2], ", ", ext_mu[3], "], true);",
                          "var tl = cm_", id, ".m2px([", ext_mu[1], ", ", ext_mu[4], "]); var br = cm_", id, ".m2px([", ext_mu[2], ", ", ext_mu[3], "]);",
                          ## "console.log('tl: ' + tl + ', br: ' + br);",

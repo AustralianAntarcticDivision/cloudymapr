@@ -1,3 +1,11 @@
+function is_canvas_blank(cvs) {
+    const context = cvs.getContext('2d');
+    const pixelBuffer = new Uint32Array(
+        context.getImageData(0, 0, cvs.width, cvs.height).data.buffer
+    );
+    return !pixelBuffer.some(color => color !== 0);
+}
+
 const px2m = function(xy, xsc, xoff, ysc, yoff, imxoff, imyoff, imh) { return [(xy[0] - imxoff) * xsc + xoff, ((imh - xy[1]) - imyoff) * ysc + yoff]; }
 const m2px = function(xy, xsc, xoff, ysc, yoff, imxoff, imyoff, imh) { return [(xy[0] - xoff) / xsc + imxoff, imh - ((xy[1] - yoff) / ysc + imyoff)]; }
 
@@ -24,6 +32,7 @@ var cm_$ID$={
     id: "$ID$",
     // functions for transformation from canvas pixels to map units and vice-versa
     xsc: 1, xoff: 0, ysc: 1, yoff: 0, imxoff: 0, imyoff: 0, //xoff, yoff ignored temporarily TODO
+    active_layers: [],
 //    px2m(xy) { return px2m(xy, this.xsc / this.zoom_level, this.xoff, this.ysc / this.zoom_level, this.yoff, this.imxoff, this.imyoff, this.image_wh); },
 //    m2px(xy) { return m2px(xy, this.xsc / this.zoom_level, this.xoff, this.ysc / this.zoom_level, this.yoff, this.imxoff, this.imyoff, this.image_wh); },
     px2m(xy) { return px2m(xy, this.xsc / this.zoom_level, this.ext[1] - this.ext[0], this.ysc / this.zoom_level, this.ext[3] - this.ext[2], this.imxoff, this.imyoff, this.image_wh); }, // probably wrong, fix or remove TODO
@@ -102,14 +111,7 @@ var cm_$ID$={
     },
     zoom_level: 1,
     zoom_in() {
-//        var l = (-parseInt($("#$ID$-pannable").css("left"), 10) - parseInt($('#$ID$-pannable canvas').first().css("left"), 10));
-//        var t = (-parseInt($("#$ID$-pannable").css("top"), 10) - parseInt($('#$ID$-pannable canvas').first().css("top"), 10));
-//        var vpem = vpext_mu(l, t, this.ext, this.image_wh, [$('#$ID$').innerWidth(), $('#$ID$').innerHeight()])
         this.zoom_level = this.zoom_level * 2;
-//PP        for (var i=1; i < 10; i++) {
-//PP            // apply scale temporarily, this will be reset to unity when the canvas is redrawn with proper scaling
-//PP            document.getElementById("$ID$-plot" + i).style.scale = this.zoom_level;
-//PP        }
         // adjust ext (data extent)
         var w = (this.ext[1] - this.ext[0]) / 4; var h = (this.ext[3] - this.ext[2]) / 4; // new half-width and half-height
         var ctrx = Math.max(Math.round((this.viewport_ctr[0] - this.ext0[0]) / w), 1) * w + this.ext0[0];
@@ -118,15 +120,40 @@ var cm_$ID$={
         ctry = Math.min(ctry, this.ext0[3] - h);
         // ctrx and ctry give the centre for the zoom, which won't be the centre of the existing data extent if we have zoomed somewhere not near the original centre
         console.log("data centre for zoom: " + [ctrx, ctry] + ", width: " + w);
+        var ext0 = this.ext.map((x) => x); // copy of unzoomed ext
         this.ext = [ctrx - w, ctrx + w, ctry - h, ctry + h];
         this.res = this.res / 2;
         // change the xsc, ysc etc? TODO (if yes, don't modify those things by zoom level in other funcs)
         // send to server
         Shiny.setInputValue("$ID$-do_zoom", this.ext.concat([this.res, this.zoom_level]).concat(this.viewport_ctr));
-        // this probably needs to happen after the replot: update the viewport css pos
-        //        var pxoff = cm_mymap.m2px(this.viewport_ctr, false); // centre in pixels
-        //        $('#$ID$-pannable').css({"left": cm_mymap.vpsz_px()[0] / 2 - pxoff[0], "top": cm_mymap.vpsz_px()[1] / 2 - pxoff[1]});
-        // TODO can we apply the css scale and recentre the viewport now, before the server-side redraw at zoomed resolution?
+        // apply the css scale and recentre the viewport now, before the server-side redraw at zoomed resolution
+        // calculate the css offsets that we'll need to apply
+        var fx = (this.viewport_ctr[0] - this.ext[0]) / (this.ext[1] - this.ext[0]); // fraction of x-extent
+        var cssx = this.image_wh * fx - $('#$ID$').innerWidth() / 2 + parseInt($("#$ID$-pannable").css("left"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+        var fy = (this.ext[3] - this.viewport_ctr[1]) / (this.ext[3] - this.ext[2]); // fraction of y-extent (downwards from top)
+        var cssy = this.image_wh * fy - $('#$ID$').innerHeight() / 2 + parseInt($("#$ID$-pannable").css("top"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+        var ch = $("#$ID$-pannable canvas"); // all child canvas elements
+        var ctxlist = window[this.id + "_ctxlist"];
+        var image_wh = this.image_wh;
+        var ext = this.ext;
+        var al = this.active_layers;
+        ch.each( function(idx, el) {
+            // idx is the integer index (0-based)
+            var this_ctx = ctxlist[idx + 1];
+            if (al.includes(idx + 1) && !is_canvas_blank(this_ctx.canvas)) {
+                var ocv = new OffscreenCanvas(image_wh, image_wh); // TODO is it faster to (re)use a single OffscreenCanvas instead of instantiating a new one each time? Also for older browsers that don't support this, would presumably need to use a canvas in the DOM (but not visible)
+                var octx = ocv.getContext('2d');
+                var srcx = (ext[0] - ext0[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width; // top-left x coord of source
+                var srcy = (ext0[3] - ext[3]) / (ext0[3] - ext0[2]) * this_ctx.canvas.height;
+                var srcw = this_ctx.canvas.width / 2; // or (ext[1] - ext[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width;
+                var srch = this_ctx.canvas.height / 2;
+                // draw to offscreen canvas
+                octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, 0, 0, image_wh, image_wh); // first four are the source x,y,w,h
+                this_ctx.clearRect(0, 0, image_wh, image_wh); // clear the on-screen one
+                $(this).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
+                this_ctx.drawImage(ocv, 0, 0, image_wh, image_wh); // copy the offscreen one into on-screen
+            }
+        });
     },
     zoom_out() {
         if (this.zoom_level > 1) {
@@ -161,6 +188,7 @@ var cm_$ID$={
         this.viewport_ctr = xy;
     },*/
 
+    // set the viewport centre to `xy` (specified in map units) and pan the image canvases appropriately
     set_vpctr_mu(xy) {
         var fx = (xy[0] - this.ext[0]) / (this.ext[1] - this.ext[0]); // fraction of x-extent
         var cssx = this.image_wh * fx - $('#$ID$').innerWidth() / 2 + parseInt($("#$ID$-pannable").css("left"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
