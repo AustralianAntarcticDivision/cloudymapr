@@ -119,7 +119,7 @@ var cm_$ID$={
         var ctry = Math.max(Math.round((this.viewport_ctr[1] - this.ext0[2]) / h), 1) * h + this.ext0[2];
         ctry = Math.min(ctry, this.ext0[3] - h);
         // ctrx and ctry give the centre for the zoom, which won't be the centre of the existing data extent if we have zoomed somewhere not near the original centre
-        console.log("data centre for zoom: " + [ctrx, ctry] + ", width: " + w);
+        console.log("data centre for zoom: " + [ctrx, ctry] + ", half-width: " + w + ", viewport centre: ", this.viewport_ctr);
         var ext0 = this.ext.map((x) => x); // copy of unzoomed ext
         this.ext = [ctrx - w, ctrx + w, ctry - h, ctry + h];
         this.res = this.res / 2;
@@ -132,6 +132,7 @@ var cm_$ID$={
         var cssx = this.image_wh * fx - $('#$ID$').innerWidth() / 2 + parseInt($("#$ID$-pannable").css("left"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
         var fy = (this.ext[3] - this.viewport_ctr[1]) / (this.ext[3] - this.ext[2]); // fraction of y-extent (downwards from top)
         var cssy = this.image_wh * fy - $('#$ID$').innerHeight() / 2 + parseInt($("#$ID$-pannable").css("top"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+        //console.log("zoom centre css is: " + [cssx, cssy]);
         var ch = $("#$ID$-pannable canvas"); // all child canvas elements
         var ctxlist = window[this.id + "_ctxlist"];
         var image_wh = this.image_wh;
@@ -150,7 +151,7 @@ var cm_$ID$={
                 // draw to offscreen canvas
                 octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, 0, 0, image_wh, image_wh); // first four are the source x,y,w,h
                 this_ctx.clearRect(0, 0, image_wh, image_wh); // clear the on-screen one
-                $(this).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
+                $("#$ID$-plot" + (idx + 1)).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
                 this_ctx.drawImage(ocv, 0, 0, image_wh, image_wh); // copy the offscreen one into on-screen
             }
         });
