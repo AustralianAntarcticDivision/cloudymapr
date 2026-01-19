@@ -133,28 +133,24 @@ var cm_$ID$={
         var fy = (this.ext[3] - this.viewport_ctr[1]) / (this.ext[3] - this.ext[2]); // fraction of y-extent (downwards from top)
         var cssy = this.image_wh * fy - $('#$ID$').innerHeight() / 2 + parseInt($("#$ID$-pannable").css("top"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
         //console.log("zoom centre css is: " + [cssx, cssy]);
-        var ch = $("#$ID$-pannable canvas"); // all child canvas elements
         var ctxlist = window[this.id + "_ctxlist"];
-        var image_wh = this.image_wh;
-        var ext = this.ext;
-        var al = this.active_layers;
-        ch.each( function(idx, el) {
-            // idx is the integer index (0-based)
-            var this_ctx = ctxlist[idx + 1];
-            if (al.includes(idx + 1) && !is_canvas_blank(this_ctx.canvas)) {
-                var ocv = new OffscreenCanvas(image_wh, image_wh); // TODO is it faster to (re)use a single OffscreenCanvas instead of instantiating a new one each time? Also for older browsers that don't support this, would presumably need to use a canvas in the DOM (but not visible)
-                var octx = ocv.getContext('2d');
-                var srcx = (ext[0] - ext0[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width; // top-left x coord of source
-                var srcy = (ext0[3] - ext[3]) / (ext0[3] - ext0[2]) * this_ctx.canvas.height;
-                var srcw = this_ctx.canvas.width / 2; // or (ext[1] - ext[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width;
+        var ocv = new OffscreenCanvas(this.image_wh, this.image_wh); // TODO is it faster to (re)use a single OffscreenCanvas instead of instantiating a new one each time? Also for older browsers that don't support this, would presumably need to use a canvas in the DOM (but not visible)
+        var octx = ocv.getContext('2d');
+        for (const idx of this.active_layers) {
+            var this_ctx = ctxlist[idx];
+            if (!is_canvas_blank(this_ctx.canvas)) {
+                var srcx = (this.ext[0] - ext0[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width; // top-left x coord of source
+                var srcy = (ext0[3] - this.ext[3]) / (ext0[3] - ext0[2]) * this_ctx.canvas.height;
+                var srcw = this_ctx.canvas.width / 2; // or (this.ext[1] - this.ext[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width;
                 var srch = this_ctx.canvas.height / 2;
                 // draw to offscreen canvas
-                octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, 0, 0, image_wh, image_wh); // first four are the source x,y,w,h
-                this_ctx.clearRect(0, 0, image_wh, image_wh); // clear the on-screen one
-                $("#$ID$-plot" + (idx + 1)).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
-                this_ctx.drawImage(ocv, 0, 0, image_wh, image_wh); // copy the offscreen one into on-screen
+                octx.clearRect(0, 0, this.image_wh, this.image_wh);
+                octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, 0, 0, this.image_wh, this.image_wh); // first four are the source x,y,w,h
+                this_ctx.clearRect(0, 0, this.image_wh, this.image_wh); // clear the on-screen one
+                $("#$ID$-plot" + idx).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
+                this_ctx.drawImage(ocv, 0, 0, this.image_wh, this.image_wh); // copy the offscreen one into on-screen
             }
-        });
+        }
     },
     zoom_out() {
         if (this.zoom_level > 1) {
@@ -164,11 +160,40 @@ var cm_$ID$={
             ctrx = Math.min(ctrx, this.ext0[1] - w);
             var ctry = Math.max(Math.round((this.viewport_ctr[1] - this.ext0[2]) / h), 1) * h + this.ext0[2];
             ctry = Math.min(ctry, this.ext0[3] - h);
-            console.log("data centre for zoom out: " + [ctrx, ctry] + ", width: " + w);
+            //console.log("data centre for zoom out: " + [ctrx, ctry] + ", width: " + w + ", viewport centre: ", this.viewport_ctr);
+            var ext0 = this.ext.map((x) => x); // copy of unzoomed ext
             this.ext = [ctrx - w, ctrx + w, ctry - h, ctry + h];
-            this.res = this.res / 2;
+            //console.log("zoomed ext: " + this.ext + ", original ext: " + ext0);
+            this.res = this.res * 2;
             // send to server
             Shiny.setInputValue("$ID$-do_zoom", this.ext.concat([this.res, this.zoom_level]).concat(this.viewport_ctr));
+            // apply the css scale and recentre the viewport now, before the server-side redraw at wider extent
+            // calculate the css offsets that we'll need to apply
+            var fx = (this.viewport_ctr[0] - this.ext[0]) / (this.ext[1] - this.ext[0]); // fraction of x-extent
+            var cssx = this.image_wh * fx - $('#$ID$').innerWidth() / 2 + parseInt($("#$ID$-pannable").css("left"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+            var fy = (this.ext[3] - this.viewport_ctr[1]) / (this.ext[3] - this.ext[2]); // fraction of y-extent (downwards from top)
+            var cssy = this.image_wh * fy - $('#$ID$').innerHeight() / 2 + parseInt($("#$ID$-pannable").css("top"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+            //console.log("zoom centre css is: " + [cssx, cssy]);
+            var ctxlist = window[this.id + "_ctxlist"];
+            var ocv = new OffscreenCanvas(this.image_wh, this.image_wh);
+            var octx = ocv.getContext('2d');
+            for (const idx of this.active_layers) {
+                var this_ctx = ctxlist[idx];
+                if (!is_canvas_blank(this_ctx.canvas)) {
+                    var destx = (ext0[0] - this.ext[0]) / (this.ext[1] - this.ext[0]) * this_ctx.canvas.width; // top-left x coord in destination canvas
+                    var desty = (this.ext[3] - ext0[3]) / (this.ext[3] - this.ext[2]) * this_ctx.canvas.height;
+                    var destw = this_ctx.canvas.width / 2;
+                    var desth = this_ctx.canvas.height / 2;
+                    //console.log("dest x,y,w,h: " + destx + ", " + desty + ", " + destw + ", " + desth);
+                    // draw to offscreen canvas
+                    octx.clearRect(0, 0, this.image_wh, this.image_wh);
+                    octx.drawImage(this_ctx.canvas, 0, 0, this.image_wh, this.image_wh, destx, desty, destw, desth);
+                    this_ctx.clearRect(0, 0, this.image_wh, this.image_wh); // clear the on-screen one
+                    //console.log(" setting css: " + [-cssx, -cssy]);
+                    $("#$ID$-plot" + idx).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
+                    this_ctx.drawImage(ocv, 0, 0, this.image_wh, this.image_wh); // copy the offscreen one into on-screen
+                }
+            }
         }
     },
 
