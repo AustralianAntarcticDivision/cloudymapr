@@ -127,7 +127,8 @@ var cm_$ID$={
     w_doneResizing() {
         Shiny.setInputValue('$ID$-window_height', window.innerHeight);
         Shiny.setInputValue('$ID$-window_width', window.innerWidth);
-        Shiny.setInputValue('$ID$-view_wh', [$('#$ID$').innerWidth() / window.innerWidth, $('#$ID$').innerHeight() / window.innerHeight]);
+        // TODO not needed? Shiny.setInputValue('$ID$-view_wh', [$('#$ID$').innerWidth() / window.innerWidth, $('#$ID$').innerHeight() / window.innerHeight]);
+        Shiny.setInputValue('$ID$-viewport_size_px', [$('#$ID$').innerWidth(), $('#$ID$').innerHeight()]);
     },
     image_wh: 0,
     ext0: [0, 0, 0, 0], // the initial/max extent, we can't pan beyond this
@@ -230,7 +231,8 @@ Shiny.initializedPromise.then(function() {
     Pannable(document.querySelector('#$ID$'));
     Shiny.setInputValue('$ID$-window_height', window.innerHeight); Shiny.setInputValue('$ID$-window_width', window.innerWidth);
     /* on startup, send the viewport size info */
-    Shiny.setInputValue('$ID$-view_wh', cm_$ID$.vpsz());
+    // Shiny.setInputValue('$ID$-view_wh', cm_$ID$.vpsz());
+    Shiny.setInputValue('$ID$-viewport_size_px', cm_$ID$.vpsz_px());
     $('#$ID$-zoom_in').on('pointerdown', function(ev) { ev.preventDefault(); cm_$ID$.zoom_in(); });
     $('#$ID$-zoom_out').on('pointerdown', function(ev) { ev.preventDefault(); cm_$ID$.zoom_out(); });
     /* when the window resizes, re-send the viewport size information */

@@ -193,23 +193,27 @@ const Pannable = (elViewport) => {
     const panEnd = (ev) => {
         isPan = false;
         var id = elViewport.getAttribute('id');
+        var cm = window['cm_' + id];
         if (!didPan) {
             var rect = elViewport.getBoundingClientRect();
             if (ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) {
                 // click inside the viewport bounds
-                var x = ev.clientX - rect.left;
-                var y = rect.height - (ev.clientY - rect.top);
-                console.log(id + '-mapclick = ', x + ', ' + y + ', ' + event.button);
-                Shiny.setInputValue(id + '-mapclick', [x, y, event.button], { priority: 'event' }); // coords of click, in pixels relative to viewport
+                var xy = [ev.clientX - rect.left, ev.clientY - rect.top]; // coords of click, in pixels relative to left-top of viewport
+                // console.log("mapclick (px rel to vp): " + xy);
+                xy = [xy[0] - parseInt($("#" + cm.id + "-plot1").css("left"), 10) - parseInt($("#" + cm.id + "-pannable").css("left"), 10),
+                      xy[1] - parseInt($("#" + cm.id + "-plot1").css("top"), 10) - parseInt($("#" + cm.id + "-pannable").css("top"), 10)];
+                // console.log("mapclick (px rel to canvas): " + xy);
+                var xy_mu = [cm.ext[0] + xy[0] / cm.image_wh * (cm.ext[1] - cm.ext[0]), cm.ext[3] - xy[1] / cm.image_wh * (cm.ext[3] - cm.ext[2])];
+                // console.log("mapclick (mu): " + xy_mu);
+                Shiny.setInputValue(id + '-mapclick', xy_mu.concat(xy, event.button), { priority: 'event' }); // coords of click in map units, then in pixels relative to canvas TL plus button number
             }
         } else {
-            var cm = window['cm_' + id];
             if (cm.select_mode === 'select') {
                 // clear rectangle from canvas and send selection to server
                 var selrect = dragrect;
                 var vprect = elViewport.getBoundingClientRect();
                 ctx.clearRect(0, 0, vprect.width, vprect.height);
-                selrect.startY = vprect.height - selrect.startY; // zero at bottom, not top
+                selrect.startY = vprect.height - selrect.startY; // zero at bottom, not top // TODO fix?
                 selrect.endX = selrect.startX + selrect.w;
                 selrect.endY = selrect.startY - selrect.h;
                 Shiny.setInputValue(id + '-dragselect', [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)]); // rectangle in pixels relative to viewport

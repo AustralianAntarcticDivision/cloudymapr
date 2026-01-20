@@ -30,8 +30,6 @@ fetch_a_tile <- function(ext, dsn, res, type, target_crs, warp_opts, resampling,
 #'
 #' @return The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
 #' * click function:
-#' * get_viewport_size function:
-#' * viewport_ctr function:
 #' * layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a `terra::rast` object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
 #'
 # @examples
@@ -662,6 +660,13 @@ for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
             }
         })
 
-        list()
+        mapclick <- reactiveVal(NULL)
+        observeEvent(input$mapclick, {
+            req(input$mapclick)
+            ## cat("mapclick: ", str(input$mapclick), "\n")
+            mapclick(input$mapclick)
+        })
+
+        list(click = mapclick, layer_data = layer_data)
     })
 }
