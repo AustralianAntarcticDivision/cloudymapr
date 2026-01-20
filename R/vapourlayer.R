@@ -137,13 +137,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             c(diff(ext[1:2]), diff(ext[3:4])) / tiles_per_side
         }
 
-        set_pan_on_plot_js <- function(image_def) {
-            panjs <- paste0("cm_", id, ".update_ext([", image_def$ext[1], ",", image_def$ext[2], ",", image_def$ext[3], ",", image_def$ext[4], "]);")
-            cat("set_pan_on_plot\n  sending new ext:", panjs, "\n")
-            evaljs(panjs)
-            set_pan_on_plot <<- FALSE
-        }
-
         ## generate our image_def from the user-supplied initial_view
         ## initial_view is list(tiles_per_side, extent(xmin, xmax, ymin, ymax), res)
 
@@ -248,25 +241,21 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             ## update the image_def()$ext to the new value just sent through
             if (.debug > 0) cat("--> extending tiles\n")
             if (.clear_on_pan) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround TODO check and fix
-            i0 <- i <- image_def()
-            i$ext <- input$pan_extend[1:4]
+            i <- image_def()
+            i$ext <- input$pan_extend
             ## the viewport centre (in map units) is input$pan_extend[5:6]
             ## TODO constrain the limits to the initial_view$max_extent
             ## TODO we can optimize the next rendering by shuffling the tiles data: if we've panned left with a 2x2 tile arrangement, then the left-hand tile data can be moved into the right-hand tiles
             image_def(i) ## update the image reactive
             ## ask for pan to be reset when the next plot occurs (don't do it directly here, otherwise we're panning before the re-plot)
-            set_pan_on_plot <<- TRUE
         })
 
-        set_pan_on_plot <- FALSE ## if this is set to TRUE by the calling code (somewhere in the chain before this function is called) the viewport will be re-panned as part of the plot drawing TODO send that re-pan request to the client, or send it as a delta on the current pan
         send_plot <- function(plot_contents, plotnum, image_def, ext_mu, clear = .clear_canvas_before_drawing, as = "file") { ## x = 0, y = 0, w = image_wh, h = image_wh, 
             ## send_plot is used for vector layers, not tiled layers (see draw_tile for those)
             cat("sendplot: plot", plotnum, "updated, sending to js ")
             plotid <- paste0(id, "-plot", plotnum)
             if (missing(ext_mu)) ext_mu <- image_def$ext
-            panjs <- "" # TODO needed? or remove?
             ## idef <- isolate(image_def())
-            if (set_pan_on_plot) set_pan_on_plot_js(image_def)
             if (as == "svg" && !.svg_as_file) {
                 cat("as svg\n")
                 plot_contents <- paste0("data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)))
@@ -280,7 +269,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     plot_contents <- paste0("plots/", basename(plot_contents))
                 }
             }
-            image_js(z = plotnum, ext_mu = ext_mu, panjs = panjs, plot_contents = plot_contents, image_def = image_def, clear = clear)
+            image_js(z = plotnum, ext_mu = ext_mu, plot_contents = plot_contents, image_def = image_def, clear = clear)
             ## old, TODO remove
             ## if (as == "svg" && !.svg_as_file) {
             ##     cat("as svg\n")
@@ -411,8 +400,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 
                 cat("sending tile to js ")
                 plotid <- paste0(id, "-plot", z)
-                panjs <- "" # TODO needed? or remove?
-                if (set_pan_on_plot) set_pan_on_plot_js(image_def)
 
                 ## send the extent in map units to the client and let it work out the tlbr coords in the canvas
                 if (as == "svg" && !.svg_as_file) {
@@ -433,12 +420,12 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                         plot_contents <- paste0("plots/", basename(plot_contents))
                     }
                 }
-                image_js(z = z, ext_mu = tile_ext_mu, panjs = panjs, plot_contents = plot_contents, image_def = image_def, clear = clear)
+                image_js(z = z, ext_mu = tile_ext_mu, plot_contents = plot_contents, image_def = image_def, clear = clear)
             }
         }
 
         ## draw image on a canvas (and return the js string). If `do_eval` is FALSE, just return the string
-        image_js <- function(z, ext_mu, panjs, plot_contents, image_def = 1, clear = TRUE, do_eval = TRUE) {
+        image_js <- function(z, ext_mu, plot_contents, image_def = 1, clear = TRUE, do_eval = TRUE) {
             js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
                          ## old "var tl = cm_", id, ".m2px([", ext_mu[1], ", ", ext_mu[4], "], true); var br = cm_", id, ".m2px([", ext_mu[2], ", ", ext_mu[3], "], true);",
                          "var tl = cm_", id, ".m2px([", ext_mu[1], ", ", ext_mu[4], "]); var br = cm_", id, ".m2px([", ext_mu[2], ", ", ext_mu[3], "]);",
@@ -451,7 +438,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                          ## no trans     "this_ctx.setTransform(1, 0, 0, 1, 0, 0);" ## reset the canvas transformation
                          ## no trans },
                          if (clear) paste0("this_ctx.clearRect(tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]);"), ## before or after transformation? TODO check
-                         "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]); ", panjs, "};",
+                         "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]); };",
                          "image_", id, "_", z, ".onerror = function(e) { console.log(e) };",
                          "image_", id, "_", z, ".src = '", plot_contents, "';"##,
                          ## "document.getElementById('", id, "-plot", z, "').style.scale = 1;" ## undo the temporary css scaling

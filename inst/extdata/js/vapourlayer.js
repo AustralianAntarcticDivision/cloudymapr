@@ -41,24 +41,24 @@ const redraw_zoomed = function(cm, ext0, zoom_in) {
     var octx = ocv.getContext('2d');
     // rectangles in source canvas and destination canvas
     if (zoom_in) {
-        const srcx = (cm.ext[0] - ext0[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width; // top-left x coord of source
-        const srcy = (ext0[3] - cm.ext[3]) / (ext0[3] - ext0[2]) * this_ctx.canvas.height;
-        const srcw = this_ctx.canvas.width / 2; // or (this.ext[1] - this.ext[0]) / (ext0[1] - ext0[0]) * this_ctx.canvas.width;
-        const srch = this_ctx.canvas.height / 2;
-        const destx = 0;
-        const desty = 0;
-        const destw = cm.image_wh;
-        const desth = cm.image_wh;
+        var srcx = (cm.ext[0] - ext0[0]) / (ext0[1] - ext0[0]) * cm.image_wh; // top-left x coord of source
+        var srcy = (ext0[3] - cm.ext[3]) / (ext0[3] - ext0[2]) * cm.image_wh;
+        var srcw = cm.image_wh / 2; // or (this.ext[1] - this.ext[0]) / (ext0[1] - ext0[0]) * cm.image_wh;
+        var srch = cm.image_wh / 2;
+        var destx = 0;
+        var desty = 0;
+        var destw = cm.image_wh;
+        var desth = cm.image_wh;
     } else {
-        const destx = (ext0[0] - cm.ext[0]) / (cm.ext[1] - cm.ext[0]) * this_ctx.canvas.width; // top-left x coord in destination canvas
-        const desty = (cm.ext[3] - ext0[3]) / (cm.ext[3] - cm.ext[2]) * this_ctx.canvas.height;
-        const destw = this_ctx.canvas.width / 2;
-        const desth = this_ctx.canvas.height / 2;
+        var destx = (ext0[0] - cm.ext[0]) / (cm.ext[1] - cm.ext[0]) * cm.image_wh; // top-left x coord in destination canvas
+        var desty = (cm.ext[3] - ext0[3]) / (cm.ext[3] - cm.ext[2]) * cm.image_wh;
+        var destw = cm.image_wh / 2;
+        var desth = cm.image_wh / 2;
         //console.log("dest x,y,w,h: " + destx + ", " + desty + ", " + destw + ", " + desth);
-        const srcx = 0;
-        const srcy = 0;
-        const srcw = cm.image_wh;
-        const srch = cm.image_wh;
+        var srcx = 0;
+        var srcy = 0;
+        var srcw = cm.image_wh;
+        var srch = cm.image_wh;
     }
     for (const idx of cm.active_layers) {
         var this_ctx = ctxlist[idx];

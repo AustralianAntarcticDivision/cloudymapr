@@ -123,8 +123,54 @@ const Pannable = (elViewport) => {
                         }
                     });
                     if (extend) {
-                        // TODO should the panned extent be set now?
-                        Shiny.setInputValue(id + '-pan_extend', newext.concat([(vpext_mu[0] + vpext_mu[1]) / 2, (vpext_mu[2] + vpext_mu[3]) / 2]));
+                        console.log("pan extend from: " + cm.ext + " to: " + newext);
+                        // replot the canvases and set the panned extent now
+                        cm.ext = newext;
+                        var srcx = 0; var srcy = 0; var destx = 0; var desty = 0;
+                        var srcw = cm.image_wh; var destw = cm.image_wh;
+                        var srch = cm.image_wh; var desth = cm.image_wh;
+                        var fx = (cm.viewport_ctr[0] - newext[0]) / (newext[1] - newext[0]); // fraction of x-extent
+                        var cssx = cm.image_wh * fx - $("#" + cm.id).innerWidth() / 2 + parseInt($("#" + cm.id + "-pannable").css("left"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+                        var fy = (newext[3] - cm.viewport_ctr[1]) / (newext[3] - newext[2]); // fraction of y-extent (downwards from top)
+                        var cssy = cm.image_wh * fy - $("#" + cm.id).innerHeight() / 2 + parseInt($("#" + cm.id + "-pannable").css("top"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
+                        console.log("pan extend css is: " + [cssx, cssy]);
+                        if (panx) {
+                            srcw = cm.image_wh / 2;
+                            destw = cm.image_wh / 2;
+                            if (mvx > 0) {
+                                // leftwards
+                                destx = cm.image_wh / 2;
+                            } else {
+                                srcx = cm.image_wh / 2;
+                            }
+                        }
+                        if (pany) {
+                            srch = cm.image_wh / 2;
+                            desth = cm.image_wh / 2;
+                            if (mvy > 0) {
+                                // upwards
+                                desty = cm.image_wh / 2;
+                            } else {
+                                srcy = cm.image_wh / 2;
+                            }
+                        }
+                        console.log("pan copy from: " + [srcx, srcy, srcw, srch] + " to " + [destx, desty, destw, desth]);
+                        var ctxlist = window[cm.id + "_ctxlist"];
+                        var ocv = new OffscreenCanvas(cm.image_wh, cm.image_wh);
+                        var octx = ocv.getContext('2d');
+                        for (const idx of cm.active_layers) {
+                            var this_ctx = ctxlist[idx];
+                            if (!is_canvas_blank(this_ctx.canvas)) {
+                                // draw to offscreen canvas
+                                octx.clearRect(0, 0, cm.image_wh, cm.image_wh);
+                                octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, destx, desty, destw, desth);
+                                this_ctx.clearRect(0, 0, cm.image_wh, cm.image_wh); // clear the on-screen one
+                                console.log(" setting css: " + [-cssx, -cssy]);
+                                $("#" + cm.id + "-plot" + idx).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
+                                this_ctx.drawImage(ocv, 0, 0, cm.image_wh, cm.image_wh); // copy the offscreen one into on-screen
+                            }
+                        }
+                        Shiny.setInputValue(id + '-pan_extend', newext);
                     }
                 }
             }
