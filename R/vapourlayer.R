@@ -71,7 +71,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 
     ## config
     .debug <- 1L
-    .clear_canvas_before_drawing <- TRUE ## for vector layers, do we clear the full canvas before replotting? TODO better to just clear the area being plotted, not the whole canvas
+    .clear_canvas_before_drawing <- TRUE ## for vector layers, do we clear the full canvas before replotting?
     .use_ugd <- FALSE ## for vector layers, use unigd:ugd to generate svg. If FALSE use png format
     .svg_as_file <- TRUE ## if FALSE, send the svg string directly to the browser as b64-encoded data: but think that using a file is better for caching behaviour
     .use_fastpng <- TRUE ## if FALSE use png()
@@ -80,9 +80,9 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
     .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
     .plotres <- 96 ## dpi, only used by png graphics device
     .warp_opts <- c("-wm", "999")
-    .resampling_method <- "near"
-    ## .resampling_method <- "bilinear" ## TODO allow this to be specified on a source-by-source basis. Be aware that bilinear sampling can cause issues when the source is raster_data and it has special values like a land mask (255) but valid values are (say) 0-100: interpolation near land will give values > 100 and < 255
-    .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing? TODO remove
+    .resampling_method <- "near" ## or "bilinear" ## TODO allow this to be specified on a source-by-source basis? Be aware that bilinear sampling can cause issues when the source is raster_data and it has special values like a land mask (255) but valid values are (say) 0-100: interpolation near land will give values > 100 and < 255
+    ## the next two should not ever need to be TRUE any more
+    .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing?
     .clear_on_pan <- FALSE ## clear plots on pan? Or leave them visible while refreshing?
 
     ## initial arg checking
@@ -164,9 +164,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         image_def <- reactiveVal(list(tiles_per_side = initial_view$tiles_per_side,
                                       n_tiles = initial_view$tiles_per_side ^ 2,
                                       xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords, these do not change (only dependent on n tiles per side)
-                                      ## xy = ext_to_c_mu(extent = initial_view$extent, tiles_per_side = initial_view$tiles_per_side), ## xy centres of tiles in map coords. This changes when we pan or zoom ## don't keep this, calc when needed
-                                      ## w = tile_w, h = tile_h, ## tile width and height in map coords ## recalculate this as needed because it will change on (client-side) zoom
-                                      ext = initial_view$extent, ## TODO maintain the extent value on the client side, send it here to the server, and recalculate xy as needed from that
+                                      ext = initial_view$extent, ## the extent value is maintained on the client side, and sent here to the server when it changes
                                       res = initial_view$res, zoom = 1))
         ## testing stopifnot(isTRUE(all.equal(as.matrix(ext_to_c_mu(extent = initial_view$extent, xygrid = temp_xygrid)), as.matrix(ext_to_c_mu(extent = initial_view$extent, tiles_per_side = initial_view$tiles_per_side))))) ## as.matrix just to avoid the attributes on the tiles_per_side version
         tile_wh <- round(image_wh / initial_view$tiles_per_side) ## in pixels
@@ -193,35 +191,11 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             init_done <<- TRUE
         })
 
-        ## TODO remove refs to this view_wh <- reactiveVal(NULL)
-
         ## initial setup
         ## this doesn't need to be reactive, it only relies on constants (image_wh, id) and the dom being initialized, which it will be by the time this is called
         ## set the canvas sizes and store array of contexts
         evaljs(paste0("$('#", id, "-pannable').width('", image_wh, "px').height('", image_wh, "px'); ",
-                      id, "_ctxlist = []; for (let i = 1; i <= 9; i++) { var this_ctx = document.getElementById('", id, "-plot' + i).getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, "; ", id, "_ctxlist[i] = this_ctx; }")) ## this_ctx.fillStyle = '#00008008'; this_ctx.fillRect(0, 0, ", image_wh, ", ", image_wh, ");
-
-        ## TODO del observe({
-        ## TODO del     ## get the viewport width and height via js (this means that we only need to specify view_wh in the ui call, not the server as well)
-        ## TODO del     cat("checking view_wh\n")
-        ## TODO del     cat("input$view_wh is:", utils::capture.output(utils::str(input$view_wh)), "\n")
-        ## TODO del     if (!is.null(input$view_wh)) view_wh(input$view_wh)
-        ## TODO del })
-
-        ## init_offset <- FALSE
-        ## observe({
-        ##     ##cat("INIT entered with", utils::capture.output(utils::str(input$window_width)), utils::capture.output(utils::str(input$window_height)), utils::capture.output(utils::str(image_def())), "\n")
-        ##     req(input$window_width, input$window_height, view_wh(), image_def())
-        ##     if (!init_offset) {
-        ##         init_offset <<- TRUE
-        ##         ## set the UI sizing
-        ##         ## TODO make this less fragile, e.g. if the window changes size during app startup
-        ##         ## TODO also  by id, not class
-        ##         ## initial image offset required
-        ##         set_pan()
-        ##         cat("INIT done\n")
-        ##     }
-        ## }, priority = 99)
+                      id, "_ctxlist = []; for (let i = 1; i <= 9; i++) { var this_ctx = document.getElementById('", id, "-plot' + i).getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, "; ", id, "_ctxlist[i] = this_ctx; }"))
 
         observeEvent(input$do_zoom, {
             cat("do_zoom: ", input$do_zoom, "\n")
@@ -238,7 +212,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             cat("pan extend: ", input$pan_extend, "\n")
             ## update the image_def()$ext to the new value just sent through
             if (.debug > 0) cat("--> extending tiles\n")
-            if (.clear_on_pan) clear_tiles_data() ## there is some lagging/misplotting going on here, so use clear_tiles_data as a temporary workaround TODO check and fix
+            if (.clear_on_pan) clear_tiles_data()
             i <- image_def()
             i$ext <- input$pan_extend
             ## the viewport centre (in map units) is input$pan_extend[5:6]
@@ -268,33 +242,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 }
             }
             image_js(z = plotnum, ext_mu = ext_mu, plot_contents = plot_contents, image_def = image_def, clear = clear)
-            ## old, TODO remove
-            ## if (as == "svg" && !.svg_as_file) {
-            ##     cat("as svg\n")
-            ##     ## plot contents is an svg string
-            ##     js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = ", id, "_ctxlist[", plotnum, "];",
-            ##       "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
-            ##       if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
-            ##       "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); ", panjs, "}; image_", id, "_", plotnum, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
-            ##     evaljs(js)
-#           ##      readline("enter to continue")
-            ## } else {
-            ##     ## plot_contents is a file or raw vector
-            ##     if (is.raw(plot_contents)) {
-            ##         cat("as b64 png from raw\n")
-            ##         plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
-            ##     } else {
-            ##         cat("as image from file\n")
-            ##         plot_contents <- paste0("plots/", basename(plot_contents))
-            ##     }
-            ##     js <- paste0("var image_", id, "_", plotnum, " = new Image(); image_", id, "_", plotnum, ".onload = function() { this_ctx = ", id, "_ctxlist[", plotnum, "];",
-            ##                  "this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, ";",
-            ##                  if (clear) paste0("this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, ");"),
-            ##                  "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", x, ", ", y, ", ", w, ", ", h, "); ", panjs, "};",
-##image_", i## d, "_", plotnum, ".onerror = function() { try again by re-setting the src url?}; ^^^
-            ## "image_", id## , "_", plotnum, ".src = '", plot_contents, "';")
-            ##     evaljs(js)
-            ## }
         }
 
         clear_plot <- function(plotnum) {
@@ -316,11 +263,12 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             })
         })
 
-        clear_tiles_data <- function(z = 1:9) {
+        clear_tiles_data <- function(z) {
+            if (missing(z)) z <- which_are_raster_layers()
             td <- isolate(tiles_data())
             for (i in z) td[[i]] <- list(img = NULL)
             tiles_data(td)
-            clear_plot(z) ## TODO only clear raster tile layers?
+            clear_plot(z)
         }
 
         tiles_to_matrix <- function(td_img_data) {
@@ -361,24 +309,25 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             ## z is the layer index (e.g. into tiles_data()
             ## td is that tiles_data() entry
             ## i is the index within the layer (> 1 if we have multiple tiles per side)
-            if (clear) {
-                ## if we are about to draw a tile, then we also need to clear the tiles that have NULL data (e.g. we've just panned, and we don't yet have data for some tiles. If we don't clear these, the old tiles will remain shown)
-                for (j in setdiff(seq_along(td$img$data), i)) {
-                    if (is.null(td$img$data[[j]])) {
-                        message("img data is NULL for tile ", j, ", clearing tile")
-                        message("TODO adjust clear code for zooming!") ## TODO
-##                        ## image_def$xy_grid gives the xy centres of tiles in normalized [-1 1 -1 1] coords
-##                        half_nwh <- 2 / image_def$tiles_per_side / 2 ## tile half-width and half-height in normalized [-1 1 -1 1] coords
-##                        xn <- (image_def$xy_grid$x[j] + c(-half_nwh, half_nwh) + 1)/2 ## x-extent of tile in 0-1 coords
-##                        yn <- 1 - (image_def$xy_grid$y[j] + c(-half_nwh, half_nwh) + 1) / 2 ## y-extent of tile in 0-1 coords
-##                        cat("xn is: ", xn, ", yn is: ", yn, "\n")
-##                        tlp <- c(xn[1], yn[2]) * image_wh
-##                        brp <- c(xn[2], yn[1]) * image_wh
-##                        js <- paste0("this_ctx = ", id, "_ctxlist[", z, "]; this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");")
-##                        evaljs(js)
-                    }
-                }
-            }
+## this should not be needed now because we do an initial re-draw of each canvas on the client side after panning or zooming
+##             if (clear) {
+##                 ## if we are about to draw a tile, then we also need to clear the tiles that have NULL data (e.g. we've just panned, and we don't yet have data for some tiles. If we don't clear these, the old tiles will remain shown)
+##                 for (j in setdiff(seq_along(td$img$data), i)) {
+##                     if (is.null(td$img$data[[j]])) {
+##                         message("img data is NULL for tile ", j, ", clearing tile")
+##                         message("TODO adjust clear code for zooming!") ## TODO
+## ##                        ## image_def$xy_grid gives the xy centres of tiles in normalized [-1 1 -1 1] coords
+## ##                        half_nwh <- 2 / image_def$tiles_per_side / 2 ## tile half-width and half-height in normalized [-1 1 -1 1] coords
+## ##                        xn <- (image_def$xy_grid$x[j] + c(-half_nwh, half_nwh) + 1)/2 ## x-extent of tile in 0-1 coords
+## ##                        yn <- 1 - (image_def$xy_grid$y[j] + c(-half_nwh, half_nwh) + 1) / 2 ## y-extent of tile in 0-1 coords
+## ##                        cat("xn is: ", xn, ", yn is: ", yn, "\n")
+## ##                        tlp <- c(xn[1], yn[2]) * image_wh
+## ##                        brp <- c(xn[2], yn[1]) * image_wh
+## ##                        js <- paste0("this_ctx = ", id, "_ctxlist[", z, "]; this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");")
+## ##                        evaljs(js)
+##                     }
+##                 }
+##             }
             ## send tile to canvas
             plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]])
             if (!is.null(plot_contents)) {
@@ -425,21 +374,12 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         ## draw image on a canvas (and return the js string). If `do_eval` is FALSE, just return the string
         image_js <- function(z, ext_mu, plot_contents, image_def = 1, clear = TRUE, do_eval = TRUE) {
             js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
-                         ## old "var tl = cm_", id, ".m2px([", ext_mu[1], ", ", ext_mu[4], "], true); var br = cm_", id, ".m2px([", ext_mu[2], ", ", ext_mu[3], "], true);",
                          "var tl = cm_", id, ".m2px([", ext_mu[1], ", ", ext_mu[4], "]); var br = cm_", id, ".m2px([", ext_mu[2], ", ", ext_mu[3], "]);",
                          ## "console.log('tl: ' + tl + ', br: ' + br);",
-                         ## no trans if (image_def$zoom != 1) {
-                         ## no trans     trxy <- image_wh / 2 * (1 - image_def$zoom) ## translate x and y by -zoom * iwh/2 + iwh/2
-                         ## no trans     paste0("this_ctx.setTransform(1, 0, 0, 1, 0, 0);", ## reset the canvas transformation so that scaling/translation does not accumulate when plotting multiple tiles to the same canvas
-                         ## no trans         "this_ctx.translate(", trxy, ", ", trxy, "); this_ctx.scale(", image_def$zoom, ", ", image_def$zoom, ");")
-                         ## no trans } else {
-                         ## no trans     "this_ctx.setTransform(1, 0, 0, 1, 0, 0);" ## reset the canvas transformation
-                         ## no trans },
-                         if (clear) paste0("this_ctx.clearRect(tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]);"), ## before or after transformation? TODO check
+                         if (clear) paste0("this_ctx.clearRect(tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]);"),
                          "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, tl[0], tl[1], br[0] - tl[0], br[1] - tl[1]); };",
                          "image_", id, "_", z, ".onerror = function(e) { console.log(e) };",
                          "image_", id, "_", z, ".src = '", plot_contents, "';"##,
-                         ## "document.getElementById('", id, "-plot", z, "').style.scale = 1;" ## undo the temporary css scaling
                          )
             if (do_eval) {
                 evaljs(js)
@@ -651,9 +591,9 @@ for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
         }
 
         observe({
-            req(layerdef(), image_def()) ## view_wh(), 
+            req(layerdef(), image_def())
             if (init_done) {
-                cat("triggering generic update_tiles_data() because image_def() or layerdef() has changed\n") ## or view_wh() 
+                if (.debug > 1) cat("triggering generic update_tiles_data() because image_def() or layerdef() has changed\n")
                 for (z in which_are_raster_layers()) update_tiles_data(image_def(), z)
             } else {
                 invalidateLater(200)
