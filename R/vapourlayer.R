@@ -204,7 +204,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             i$ext <- input$do_zoom[1:4]
             i$res <- input$do_zoom[5]
             i$zoom <- input$do_zoom[6]
-            cat("idef:", str(i), "\n")
             image_def(i)
         })
 
@@ -392,14 +391,10 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         ## render data to png, but with caching
         tile_to_png <- function(...) {
             keydata <- list(...)
-cat("tile_to_png\n")
-cat(utils::str(keydata))
             if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
             keydata$td <- if (keydata$i > length(keydata$td$img$data)) NULL else keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
             keydata$i <- NULL ## so that if we ask for a tile in slot N that was previously in slot M, the cached copy can be used
             key <- rlang::hash(keydata)
-            cat("key:", key, "\n")
-            cat(utils::str(keydata))
             if (!is.null(cache) && cache$exists(key)) {
                 if (file.exists(cache$get(key))) {
                     message("got cached png: ", cache$get(key))
@@ -415,8 +410,6 @@ cat(utils::str(keydata))
         }
 
         tile_to_png_inner <- function(td, i, layerdef, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory) {
-cat("tile_to_png_inner\n")
-cat(utils::str(td), "\n")
             if (i > length(td$img$data) || is.null(td$img$data[[i]][[1]])) return(NULL)
             pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
             message("rendering raster tile to png:", pltf)
@@ -500,7 +493,8 @@ cat(utils::str(td), "\n")
                     ## cat("fetching:\n"); cat(utils::str(rgs))
                     ##if (.debug > 1)
                     if (.debug > 2) temp <- proc.time()["elapsed"]
-                    if (!"cloudymapr" %in% rownames(installed.packages())) {
+                    if (!"cloudymapr" %in% rownames(utils::installed.packages())) {
+                        ## local dev without package being installed
                         mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
                     } else {
                         mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs) ## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
@@ -603,7 +597,7 @@ for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
         mapclick <- reactiveVal(NULL)
         observeEvent(input$mapclick, {
             req(input$mapclick)
-            ## cat("mapclick: ", str(input$mapclick), "\n")
+            ## cat("mapclick: ", utils::str(input$mapclick), "\n")
             mapclick(input$mapclick)
         })
 

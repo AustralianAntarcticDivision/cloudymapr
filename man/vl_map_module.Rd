@@ -12,7 +12,7 @@ vl_map_ui_postamble()
 
 vl_map_server(
   id,
-  image_wh = 3200,
+  image_wh = 4096,
   initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 20480000, res =
     32000),
   layerdef,
@@ -41,8 +41,6 @@ vl_map_server(
 \value{
 The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
 * click function:
-* get_viewport_size function:
-* viewport_ctr function:
 * layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a `terra::rast` object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
 }
 \description{
