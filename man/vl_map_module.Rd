@@ -30,7 +30,8 @@ vl_map_server(
 \item{initial_view}{list: a named list with components:
 * tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even? TODO note that >2 currently doesn't work properly when zooming
 * extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
-* res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out}
+* res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
+* max_extent numeric: as for `extent`, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used}
 
 \item{layerdef}{reactive: TBD}
 

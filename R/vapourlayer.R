@@ -41,7 +41,7 @@ fetch_a_tile <- fetch_a_tile_gdalraster
 #' * tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even? TODO note that >2 currently doesn't work properly when zooming
 #' * extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
 #' * res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
-# ## not yet implemented * max_extent numeric: as for `extent`, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used
+#' * max_extent numeric: as for `extent`, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used
 #' @param layerdef reactive: TBD
 #' @param target_crs string: target projection CRS string
 #' @param cache logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a `cachem` object (as returned by e.g. [cachem::cache_mem()])
@@ -107,7 +107,10 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
     iv <- initial_view
     if (is.null(iv$tiles_per_side)) iv$tiles_per_side <- 1L
     if (is.null(iv$extent) || is.null(iv$res)) stop("initial_view must contain `extent` and `res` components")
-    if (is.null(iv$max_extent)) iv$max_extent <- iv$extent ## currently ignored
+    if (is.null(iv$max_extent)) iv$max_extent <- iv$extent
+    ## extent overrides max_extent if there are inconsistencies
+    iv$max_extent <- c(min(iv$extent[1], iv$max_extent[1]), max(iv$extent[2], iv$max_extent[2]),
+                       min(iv$extent[3], iv$max_extent[3]), max(iv$extent[4], iv$max_extent[4]))
     initial_view <- iv
 
     if (is.logical(cache)) {
@@ -193,6 +196,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         init_done <- FALSE
         observeEvent(input$request_init, {
             extstr <- paste0("[", initial_view$extent[1], ",", initial_view$extent[2], ",", initial_view$extent[3], ",", initial_view$extent[4], "];")
+            maxextstr <- paste0("[", initial_view$max_extent[1], ",", initial_view$max_extent[2], ",", initial_view$max_extent[3], ",", initial_view$max_extent[4], "];")
             ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];")
             alstr <- paste0("[", paste(sapply(layerdef(), function(w) w$z), collapse = ","), "];") ## active layers, 1-indexed
             ## TODO allow centre to be specifed as something else?
@@ -204,7 +208,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                           "cm_", id, ".res=", initial_view$res, ";",
                           "cm_", id, ".viewport_ctr=", ctrstr,
                           "cm_", id, ".active_layers=", alstr,
-                          "cm_", id, ".ext=", extstr, "cm_", id, ".ext0=", extstr
+                          "cm_", id, ".ext=", extstr, "cm_", id, ".ext0=", maxextstr
                           ))
             init_done <<- TRUE
         })
@@ -232,11 +236,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             if (.clear_on_pan) clear_tiles_data()
             i <- image_def()
             i$ext <- input$pan_extend
-            ## the viewport centre (in map units) is input$pan_extend[5:6]
-            ## TODO constrain the limits to the initial_view$max_extent
-            ## TODO we can optimize the next rendering by shuffling the tiles data: if we've panned left with a 2x2 tile arrangement, then the left-hand tile data can be moved into the right-hand tiles
             image_def(i) ## update the image reactive
-            ## ask for pan to be reset when the next plot occurs (don't do it directly here, otherwise we're panning before the re-plot)
         })
 
         send_plot <- function(plot_contents, plotnum, image_def, ext_mu, clear = .clear_canvas_before_drawing, as = "file") { ## x = 0, y = 0, w = image_wh, h = image_wh, 
