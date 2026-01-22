@@ -101,7 +101,7 @@ vl_demo <- function() {
         output$bg_dialog <- renderUI({
             req(input$bg)
             idx <- which(raster_meta$name == input$bg)
-            if (length(idx) == 1) tags$p("Background imagery:", raster_meta$citation[idx][[1]]) else NULL
+            if (length(idx) == 1) tags$p("Background imagery:", raster_meta$citation[idx][[1]], tags$br(), tags$br(), raster_meta$details[idx]) else NULL
         })
 
         vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj, initial_view = list(tiles_per_side = 2L, extent = c(-1, 1, -1, 1) * 2048e4, res = 32e3))

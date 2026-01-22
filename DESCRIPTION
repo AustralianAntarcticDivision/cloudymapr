@@ -1,7 +1,7 @@
 Package: cloudymapr
 Type: Package
 Title: Cloud-oriented Antarctic Mapping
-Version: 0.0.5.9900
+Version: 0.0.6
 Authors@R: c(person("Ben", "Raymond", email = "ben.raymond@aad.gov.au", role = c("aut", "cre")),
              person("Michael", "Sumner", email = "michael.sumner@aad.gov.au", role = "aut"),
              person("Australian Antarctic Division", role = "cph"))
