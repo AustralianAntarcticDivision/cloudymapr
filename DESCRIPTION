@@ -19,9 +19,11 @@ Imports:
   dplyr,
   DT,
   fastpng,
+  gdalraster,
   htmltools,
   leaflet,
   magrittr,
+  methods,
   mirai (>= 2.4.1),
   pals,
   rlang,
@@ -32,10 +34,9 @@ Imports:
   tibble,
   unigd (>= 0.1.2),
   utils,
-  uuid,
-  vapour
+  uuid
 RoxygenNote: 7.3.2
 X-schema.org-applicationCategory: Antarctic/Southern Ocean
 X-schema.org-keywords: Antarctic, Southern Ocean, mapping
 X-schema.org-isPartOf: https://antarctica.gov.au, https://scar.org
-Remotes: coolbutuseless/nara, hypertidy/sds, hypertidy/vapour, hypertidy/ximage
+Remotes: hypertidy/sds

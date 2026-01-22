@@ -11,6 +11,7 @@
 #' @importFrom grDevices col2rgb dev.off hcl.colors png
 #' @importFrom leaflet addTiles addWMSTiles leaflet leafletCRS leafletOptions setView tileOptions WMSTileOptions
 #' @importFrom magrittr %>%
+#' @importFrom methods new
 #' @importFrom sf st_as_sf st_coordinates `st_crs<-` st_geometry st_transform
 #' @importFrom shiny actionButton addResourcePath checkboxInput column fluidPage fluidRow HTML icon invalidateLater isolate moduleServer NS observe observeEvent onSessionEnded reactive reactiveVal renderUI req selectInput shinyApp singleton tags tagList uiOutput wellPanel
 #' @importFrom stats runif
