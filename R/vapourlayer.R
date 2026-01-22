@@ -197,9 +197,8 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         observeEvent(input$request_init, {
             extstr <- paste0("[", initial_view$extent[1], ",", initial_view$extent[2], ",", initial_view$extent[3], ",", initial_view$extent[4], "];")
             maxextstr <- paste0("[", initial_view$max_extent[1], ",", initial_view$max_extent[2], ",", initial_view$max_extent[3], ",", initial_view$max_extent[4], "];")
-            ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];")
+            ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];") ## TODO allow centre to be specifed as something else?
             alstr <- paste0("[", paste(sapply(layerdef(), function(w) w$z), collapse = ","), "];") ## active layers, 1-indexed
-            ## TODO allow centre to be specifed as something else?
             evaljs(paste0("cm_", id, ".xsc=", diff(initial_view$extent[1:2]) / image_wh, ";",
                           "cm_", id, ".ysc=", diff(initial_view$extent[3:4]) / image_wh, ";",
                           "cm_", id, ".xoff=0;cm_", id, ".yoff=0;",

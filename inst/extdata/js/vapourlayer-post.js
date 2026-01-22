@@ -1,3 +1,22 @@
+async function pan_canvases(cm, srcx, srcy, srcw, srch, destx, desty, destw, desth, cssx, cssy) {
+    var ctxlist = window[cm.id + "_ctxlist"];
+    var ocv = new OffscreenCanvas(cm.image_wh, cm.image_wh);
+    var octx = ocv.getContext('2d');
+    for (const idx of cm.active_layers) {
+        var this_ctx = ctxlist[idx];
+        if (!is_canvas_blank(this_ctx.canvas)) {
+            // draw to offscreen canvas
+            octx.clearRect(0, 0, cm.image_wh, cm.image_wh);
+            octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, destx, desty, destw, desth);
+            this_ctx.clearRect(0, 0, cm.image_wh, cm.image_wh); // clear the on-screen one
+            console.log(" setting css of layer " + idx + ": " + [-cssx, -cssy]);
+            $("#" + cm.id + "-plot" + idx).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
+            this_ctx.drawImage(ocv, 0, 0, cm.image_wh, cm.image_wh); // copy the offscreen one into on-screen
+        }
+    }
+    return true;
+}
+
 const Pannable = (elViewport) => {
     // modified from https://stackoverflow.com/questions/68280184/panning-image-when-overflow-scroll
     elViewport.addEventListener('contextmenu', (ev) => { ev.preventDefault(); }); // enable right-click on the viewport
@@ -42,8 +61,7 @@ const Pannable = (elViewport) => {
             var ch = $("#" + id + "-pannable canvas"); // all child canvas elements
 //NOPV            var ch = $("#" + id + " .viewport-image"); // all child canvas elements
             if (ch.length > 0) {
-                //PP var mvx = ev.movementX; var mvy = ev.movementY; // if panning the viewport. positive X means moving leftwards
-                var mvx = ev.movementX; var mvy = ev.movementY; // if panning the layers
+                var mvx = ev.movementX; var mvy = ev.movementY;
                 // console.log('pan mX: ' + mvx + ', mY:' + mvy);
                 var vpext_mu = cm.vpext_mu();
                 // console.log("pan: start vpext_mu is " + vpext_mu);
@@ -53,7 +71,7 @@ const Pannable = (elViewport) => {
                 vpext_mu[3] = vpext_mu[3] + mvy * cm.ysc;
                 // console.log("pan: with move vpext_mu is " + vpext_mu);
 
-                var extend = false; // need to extend the data?
+                var extendx = false; var extendy = false; // need to extend the data?
                 var panx = false; var pany = false; // allow the pan? (not beyond allowable extent)
                 var dx = (cm.ext[1] - cm.ext[0]) / 2;
                 var dy = (cm.ext[3] - cm.ext[2]) / 2;
@@ -69,7 +87,7 @@ const Pannable = (elViewport) => {
                             // beyond current data extent, extend
                             newext[0] = newext[0] - dx;
                             newext[1] = newext[1] - dx;
-                            extend = true;
+                            extendx = true;
                         }
                     }
                 } else if (mvx < 0) {
@@ -80,7 +98,7 @@ const Pannable = (elViewport) => {
                             // beyond current data extent, extend
                             newext[0] = newext[0] + dx;
                             newext[1] = newext[1] + dx;
-                            extend = true;
+                            extendx = true;
                         }
                     }
                 }
@@ -93,7 +111,7 @@ const Pannable = (elViewport) => {
                             // console.log("extend");
                             newext[2] = newext[2] - dy;
                             newext[3] = newext[3] - dy;
-                            extend = true;
+                            extendy = true;
                         }
                     }
                 } else if (mvy > 0) {
@@ -104,7 +122,7 @@ const Pannable = (elViewport) => {
                             // console.log("extend");
                             newext[2] = newext[2] + dy;
                             newext[3] = newext[3] + dy;
-                            extend = true;
+                            extendy = true;
                         }
                     }
                 }
@@ -122,7 +140,7 @@ const Pannable = (elViewport) => {
                             $(this).css("top", t + mvy);
                         }
                     });
-                    if (extend) {
+                    if (extendx || extendy) {
                         console.log("pan extend from: " + cm.ext + " to: " + newext);
                         // replot the canvases and set the panned extent now
                         cm.ext = newext;
@@ -134,7 +152,7 @@ const Pannable = (elViewport) => {
                         var fy = (newext[3] - cm.viewport_ctr[1]) / (newext[3] - newext[2]); // fraction of y-extent (downwards from top)
                         var cssy = cm.image_wh * fy - $("#" + cm.id).innerHeight() / 2 + parseInt($("#" + cm.id + "-pannable").css("top"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
                         console.log("pan extend css is: " + [cssx, cssy]);
-                        if (panx) {
+                        if (extendx) {
                             srcw = cm.image_wh / 2;
                             destw = cm.image_wh / 2;
                             if (mvx > 0) {
@@ -144,7 +162,7 @@ const Pannable = (elViewport) => {
                                 srcx = cm.image_wh / 2;
                             }
                         }
-                        if (pany) {
+                        if (extendy) {
                             srch = cm.image_wh / 2;
                             desth = cm.image_wh / 2;
                             if (mvy > 0) {
@@ -155,22 +173,8 @@ const Pannable = (elViewport) => {
                             }
                         }
                         console.log("pan copy from: " + [srcx, srcy, srcw, srch] + " to " + [destx, desty, destw, desth]);
-                        var ctxlist = window[cm.id + "_ctxlist"];
-                        var ocv = new OffscreenCanvas(cm.image_wh, cm.image_wh);
-                        var octx = ocv.getContext('2d');
-                        for (const idx of cm.active_layers) {
-                            var this_ctx = ctxlist[idx];
-                            if (!is_canvas_blank(this_ctx.canvas)) {
-                                // draw to offscreen canvas
-                                octx.clearRect(0, 0, cm.image_wh, cm.image_wh);
-                                octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, destx, desty, destw, desth);
-                                this_ctx.clearRect(0, 0, cm.image_wh, cm.image_wh); // clear the on-screen one
-                                console.log(" setting css: " + [-cssx, -cssy]);
-                                $("#" + cm.id + "-plot" + idx).css({ "left": -cssx, "top": -cssy }); // set the new on-screen css offsets
-                                this_ctx.drawImage(ocv, 0, 0, cm.image_wh, cm.image_wh); // copy the offscreen one into on-screen
-                            }
-                        }
                         Shiny.setInputValue(id + '-pan_extend', newext);
+                        pan_canvases(cm, srcx, srcy, srcw, srch, destx, desty, destw, desth, cssx, cssy); // don't wait for it
                     }
                 }
             }
