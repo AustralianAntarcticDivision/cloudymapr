@@ -1,9 +1,9 @@
 ## fetch_a_tile_vapour <- function(ext, dsn, res, type, target_crs, warp_opts, resampling, ...) {
+##     if (missing(warp_opts) || length(warp_opts) < 1) warp_opts <- character()
 ##     tryCatch({
 ##         dt <- if (type == "raster_data") {
 ##                   vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, resample = resampling, options = warp_opts)
 ##               } else if (type == "raster_image_rgb") {
-##
 ##                   vapour::gdal_raster_nara(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = resampling, options = warp_opts)
 ##               } else {
 ##                   ## raster_image_grey
@@ -14,10 +14,11 @@
 ## }
 
 fetch_a_tile_gdalraster <- function(ext, dsn, res, type, target_crs, warp_opts, resampling, ...) {
+    if (length(res) == 1) res <- c(res, res)
     tryCatch({
         outfile <- tempfile(tmpdir = "/vsimem")
         ## or warp to a GDALRaster dst_ds <- create("MEM", "", 20, 20, 1, "Byte", return_obj = TRUE)
-        gdalraster::warp(dsn, dst_filename = outfile, t_srs = target_crs, cl_arg = c("-te", ext[1], ext[3], ext[2], ext[4], "-tr", res, res, "-r", resampling, if (type == "raster_image_rgb") c("-ot", "Byte", "-srcband", 1, "-srcband", 2, "-srcband", 3), if (type == "raster_image_grey") c("-ot", "Byte", "-srcband", 1), warp_opts)) ##, "-multi", "-wo", "NUM_THREADS=ALL_CPUS"))
+        gdalraster::warp(dsn, dst_filename = outfile, t_srs = target_crs, cl_arg = c("-te", ext[1], ext[3], ext[2], ext[4], "-tr", res[1], res[2], "-r", resampling, if (type == "raster_image_rgb") c("-ot", "Byte", "-srcband", 1, "-srcband", 2, "-srcband", 3), if (type == "raster_image_grey") c("-ot", "Byte", "-srcband", 1), warp_opts)) ##, "-multi", "-wo", "NUM_THREADS=ALL_CPUS"))
         ## -multi
         ## Use multithreaded warping implementation. Two threads will be used to process chunks of image and perform input/output operation simultaneously. Note that computation is not multithreaded itself. To do that, you can use the ⁠-wo NUM_THREADS=val/ALL_CPUS⁠ option, which can be combined with -multi.
         ds <- new(gdalraster::GDALRaster, outfile)
@@ -438,7 +439,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     if (!is.null(attr(td$img$data[[i]], "gis"))) {
                         ## gdalraster format
                         tdim <- attr(td$img$data[[i]], "gis")$dim
-                        m <- t(matrix(td$img$data[[i]], nrow = tdim[2]))
+                        m <- t(matrix(td$img$data[[i]], nrow = tdim[1]))
                     } else {
                         tdim <- attr(td$img$data[[i]], "dimension")
                         m <- matrix(td$img$data[[i]][[1]], nrow = tdim[2], byrow = TRUE)
@@ -454,7 +455,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     if (!is.null(attr(td$img$data[[i]], "gis"))) {
                         ## gdalraster format
                         tdim <- attr(td$img$data[[i]], "gis")$dim
-                        dat <- t(matrix(td$img$data[[i]], nrow = tdim[2]))
+                        dat <- t(matrix(td$img$data[[i]], nrow = tdim[1]))
                     } else {
                         tdim <- attr(td$img$data[[i]], "dimension")
                         dat <- as.vector(td$img$data[[i]][[1]])
@@ -470,7 +471,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     } else if (!is.null(attr(td$img$data[[i]], "gis"))) {
                         ## gdalraster rgb format
                         tdim <- attr(td$img$data[[i]], "gis")$dim
-                        dat <- aperm(array(td$img$data[[i]], dim = c(tdim[2], tdim[1], 3)), c(2, 1, 3))
+                        dat <- aperm(array(td$img$data[[i]], dim = c(tdim[1:2], 3)), c(2, 1, 3))
                     } else {
                         ## rgb raster via vapour
                         tdim <- attr(td$img$data[[i]], "dimension")
