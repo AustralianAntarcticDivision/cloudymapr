@@ -23,26 +23,30 @@ vl_map_server(
 \arguments{
 \item{id}{string: HTML element id}
 
-\item{view_wh}{numeric: two-element vector giving the width and height of the map widget as percentages of the browser window width and height in valid css units (e.g. `view_wh = c("400px", "250px")` or `view_wh = c("60vw", "40vh")`}
+\item{view_wh}{numeric: two-element vector giving the width and height of the map widget as percentages of the browser window width and height in valid css units (e.g. \code{view_wh = c("400px", "250px")} or \code{view_wh = c("60vw", "40vh")}}
 
 \item{image_wh}{integer: image size in pixels. Depending on the rendering mechanism, the native image size might not actually be this, but the browser will scale to this size}
 
 \item{initial_view}{list: a named list with components:
-* tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even? TODO note that >2 currently doesn't work properly when zooming
-* extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
-* res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
-* max_extent numeric: as for `extent`, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used}
+\itemize{
+\item tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even? TODO note that >2 currently doesn't work properly when zooming
+\item extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
+\item res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
+\item max_extent numeric: as for \code{extent}, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used
+}}
 
 \item{layerdef}{reactive: TBD}
 
-\item{target_crs}{string: target projection CRS string}
+\item{target_crs}{string or reactiveVal: target projection CRS string}
 
-\item{cache}{logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a `cachem` object (as returned by e.g. [cachem::cache_mem()])}
+\item{cache}{logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a \code{cachem} object (as returned by e.g. \code{\link[cachem:cache_mem]{cachem::cache_mem()}})}
 }
 \value{
 The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
-* click function:
-* layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a `terra::rast` object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
+\itemize{
+\item click function:
+\item layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a \code{terra::rast} object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
+}
 }
 \description{
 Vapourlayer map shiny module

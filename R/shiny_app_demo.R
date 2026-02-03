@@ -55,8 +55,6 @@ vl_demo <- function() {
     sx$latitude <- sx$lat
     sx <- st_as_sf(sx, coords = c("lon", "lat"))
     st_crs(sx) <- lonlat_crs
-    sx <- st_transform(sx, crs = target_crs)
-    sx <- bind_cols(sx, st_coordinates(sx))
 
     ui <- fluidPage(
         tags$hr(),
@@ -64,7 +62,9 @@ vl_demo <- function() {
                         checkboxInput("cst", label = "Coastline", value = TRUE),
                         checkboxInput("ccamlr_areas", label = "CCAMLR Areas"),
                         tags$hr(),
-                        uiOutput("bg_dialog")),
+                        uiOutput("bg_dialog"),
+                        ##selectInput("crs", label = "Projection", choices = list("Polar stereographic" = "EPSG:3031", "Equal-area" = "EPSG:3409", Mercator = "EPSG:3857"))
+                        ),
                  column(10, style = "overflow-y:hidden; height:65vh;", vl_map_ui("mymap", view_wh = c("75vw", "60vh")))),
         fluidRow(column(4, offset = 2, uiOutput("data_value")),
                  column(6, tags$p(tags$strong("Data values at site nearest to click point:")), DT::dataTableOutput("site_tbl"))),
@@ -75,17 +75,18 @@ vl_demo <- function() {
         layerdef <- reactive({
             bg <- if (is.null(input$bg) || !input$bg %in% raster_cat$name) raster_cat[raster_cat$name == "EO Basemap", ] else raster_cat[raster_cat$name == input$bg, ]
             list(bg %>% mutate(z = 1L), ## raster layer using inbuilt renderer
-                 list(fun = function(xlim, ylim, zoom) { ## custom layer using own plot function
+                 list(fun = function(xlim, ylim, zoom, ...) { ## custom layer using own plot function
                      if (isTRUE(input$cst)) {
                          plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
-                         plot(cst, border = "black", col = NA, add = TRUE, xlim = xlim, ylim = ylim, lwd = 1)
-                         points(sx$X, sx$Y, pch = 21, bg = "green")
+                         plot(cst_data(), border = "black", col = NA, add = TRUE, xlim = xlim, ylim = ylim, lwd = 1)
+                         sx <- st_coordinates(sx_data())
+                         points(sx[, 1], sx[, 2], pch = 21, bg = "green")
                          TRUE
                      } else {
                          FALSE
                      }
                  }, z = 2),
-                 list(fun = function(xlim, ylim, zoom) { ## custom layer using own plot function
+                 list(fun = function(xlim, ylim, zoom, ...) { ## custom layer using own plot function
                      if (isTRUE(input$ccamlr_areas)) {
                          plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
                          plot(ccamlr_areas, border = "blue", col = NA, add = TRUE, xlim = xlim, ylim = ylim)
@@ -104,7 +105,17 @@ vl_demo <- function() {
             if (length(idx) == 1) tags$p("Background imagery:", raster_meta$citation[idx][[1]], tags$br(), tags$br(), raster_meta$details[idx]) else NULL
         })
 
-        vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj, initial_view = list(tiles_per_side = 2L, extent = c(-1, 1, -1, 1) * 2048e4, res = 32e3))
+        vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj,
+                                initial_view = list(tiles_per_side = 2L, res = 32e3, extent = c(-1, 1, -1, 1) * 2048e4))
+
+        cst_data <- reactive({
+            req(vl_obj$crs())
+            st_transform(cst, crs = vl_obj$crs())
+        })
+        sx_data <- reactive({
+            req(vl_obj$crs())
+            bind_cols(st_transform(sx, crs = vl_obj$crs()), st_coordinates(sx))
+        })
 
         ## handle click events
         observeEvent(vl_obj$click(), {

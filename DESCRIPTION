@@ -35,6 +35,7 @@ Imports:
   unigd (>= 0.1.2),
   utils,
   uuid
+Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 X-schema.org-applicationCategory: Antarctic/Southern Ocean
 X-schema.org-keywords: Antarctic, Southern Ocean, mapping

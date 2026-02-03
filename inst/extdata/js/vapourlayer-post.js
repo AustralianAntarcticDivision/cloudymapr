@@ -174,7 +174,7 @@ const Pannable = (elViewport) => {
                         }
                         console.log("pan copy from: " + [srcx, srcy, srcw, srch] + " to " + [destx, desty, destw, desth]);
                         Shiny.setInputValue(id + '-pan_extend', newext);
-                        pan_canvases(cm, srcx, srcy, srcw, srch, destx, desty, destw, desth, cssx, cssy); // don't wait for it
+                        pan_canvases(cm, srcx, srcy, srcw, srch, destx, desty, destw, desth, cssx, cssy); // don't wait for it, but note that it's still running in the same (main) thread
                     }
                 }
             }

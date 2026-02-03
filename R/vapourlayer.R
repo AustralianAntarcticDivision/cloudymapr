@@ -44,7 +44,7 @@ fetch_a_tile <- fetch_a_tile_gdalraster
 #' * res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
 #' * max_extent numeric: as for `extent`, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used
 #' @param layerdef reactive: TBD
-#' @param target_crs string: target projection CRS string
+#' @param target_crs string or reactiveVal: target projection CRS string
 #' @param cache logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a `cachem` object (as returned by e.g. [cachem::cache_mem()])
 #'
 #' @return The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
@@ -61,6 +61,9 @@ vl_map_ui <- function(id, view_wh = c("40vw", "40vh")) {
                   tags$style(paste0("#", id, "-plot", 1:9, " { z-index:-", 9:1, "; }", collapse = " ")), ## plot1 lowest, plot9 top-most
                   tags$style(paste0("#", id, " { width:", view_wh[1], "; height:", view_wh[2], "; }")),
                   singleton(tags$script("$(document).on('shiny:sessioninitialized', function() { Shiny.addCustomMessageHandler('evaljs', function(jsexpr) { eval(jsexpr) }); });")),
+                  singleton(tags$script(type = "text/javascript", src = "https://cdn.jsdelivr.net/npm/gdal3.js@2.8.1/dist/package/gdal3.js",
+                                        integrity = "sha384-yW4c2Jx7lsREjJg58+ZI5U6gAso2bRAPw3LdzPWm7z8+rMJ24R7AS+EFyXDPxgYM", crossorigin = "anonymous")),
+                  singleton(tags$script(HTML(paste(readLines(system.file("extdata/js/vapourlayer-common.js", package = "cloudymapr"), warn = FALSE, encoding = "UTF-8"), collapse = "\n")))),
                   tags$script(HTML(paste(gsub("$ID$", id, readLines(system.file("extdata/js/vapourlayer.js", package = "cloudymapr"), warn = FALSE, encoding = "UTF-8"), fixed = TRUE), collapse = "\n")))
                   ),
         tags$div(style = "position:relative; margin-top:1px;",
@@ -139,6 +142,20 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             isolate(which(!vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
         }
 
+        ## make target crs reactive if needed
+        if (!is.reactive(target_crs)) {
+            if (!(is.character(target_crs) && length(target_crs) == 1 && !is.na(target_crs) && nzchar(target_crs))) {
+                stop("target_crs should be a non-empty/non-NA string")
+            }
+            target_crs <- reactiveVal(target_crs)
+        }
+        ## check that it's valid
+        ok <- tryCatch(sf::st_crs(isolate(target_crs())), error = function(e) {
+            if (grepl("invalid crs", conditionMessage(e), ignore.case = TRUE)) {
+                warning("target_crs '", isolate(target_crs()), "' might be invalid")
+            }
+        })
+
         ## xy centres of tiles in map coords
         ext_to_c_mu <- function(extent, tiles_per_side, xygrid) {
             ## xygrid is normalized coords of centres in [-1 1 -1 1] space
@@ -204,6 +221,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                           "cm_", id, ".ysc=", diff(initial_view$extent[3:4]) / image_wh, ";",
                           "cm_", id, ".xoff=0;cm_", id, ".yoff=0;",
                           "cm_", id, ".imxoff=", image_wh / 2, ";cm_", id, ".imyoff=", image_wh / 2, ";",
+                          "cm_", id, ".crs='", target_crs(), "';",
                           "cm_", id, ".image_wh=", image_wh, ";",
                           "cm_", id, ".res=", initial_view$res, ";",
                           "cm_", id, ".viewport_ctr=", ctrstr,
@@ -272,7 +290,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         layer_data <- lapply(1:9, function(z) {
             reactive({
                 if (isTRUE(isolate(layerdef()[[z]])$type %in% c("raster_data", "raster_image_grey"))) {
-                    terra::rast(tiles_to_matrix(tiles_data()[[z]]$img$data), crs = target_crs, extent = image_def()$ext)
+                    terra::rast(tiles_to_matrix(tiles_data()[[z]]$img$data), crs = target_crs(), extent = image_def()$ext)
                 } else {
                     ## TODO other image types. RGB should be able to return RGB colours as a 3-band raster
                     NULL
@@ -520,7 +538,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             this_ext <- xywh_to_ext(x = xy$x[i], y = xy$y[i], w = twh[1], h = twh[2])
             cat("fetching data: ext ", this_ext, ", res ", t$res, "\n")
             ld <- layerdef()[[z]]
-            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs, warp_opts = .warp_opts, resampling = .resampling_method)
+            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs(), warp_opts = .warp_opts, resampling = .resampling_method)
             key <- rlang::hash(rgs)
             if (!is.null(cache) && cache$exists(key)) {
                 result <- cache$get(key)
@@ -577,20 +595,20 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             if (length(done) > 0) mirai_queue <<- mirai_queue[-done]
             shiny::invalidateLater(100)
         })
-##        ^^^
+
         observe({
-            req(image_def())
+            req(image_def(), target_crs())
             if (init_done) {
 cat("--> in vector layer plotter\n")
             ## deal with non-raster layers for which the user has provided a plot function
-for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
+                for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def(), crs = target_crs())
             } else {
                 invalidateLater(200)
             }
         }, priority = 9)
 
         vector_plot_sources <- rep(NA_character_, 9)
-        do_vector_plot <- function(i, image_def, iext) {
+        do_vector_plot <- function(i, image_def, iext, crs) {
             ld <- isolate(layerdef())
             if (missing(iext)) iext <- image_def$ext
             if (!is.null(ld[[i]]) && "fun" %in% names(ld[[i]])) {
@@ -606,7 +624,7 @@ for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
                 }
                 opar <- par(no.readonly = TRUE)
                 par(mai = c(0, 0, 0, 0), xaxs = "i", yaxs = "i") ## zero margins
-                ok <- ld[[i]]$fun(xlim = iext[1:2], ylim = iext[3:4], zoom = image_def$zoom)
+                ok <- ld[[i]]$fun(xlim = iext[1:2], ylim = iext[3:4], zoom = image_def$zoom, crs = crs)
                 if (ok && .use_ugd) {
                     if (.svg_as_file) {
                         unigd::ugd_save(file = pltf)
@@ -629,7 +647,7 @@ for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
         }
 
         observe({
-            req(layerdef(), image_def())
+            req(layerdef(), image_def(), target_crs())
             if (init_done) {
                 if (.debug > 1) cat("triggering generic update_tiles_data() because image_def() or layerdef() has changed\n")
                 for (z in which_are_raster_layers()) update_tiles_data(image_def(), z)
@@ -645,6 +663,19 @@ for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def())
             mapclick(input$mapclick)
         })
 
-        list(click = mapclick, layer_data = layer_data)
+        observeEvent(input$reproj, {
+            if (isTRUE(input$reproj$crs != target_crs())) {
+                cat("reproj: ", utils::str(input$reproj), "\n")
+                i <- image_def()
+                i$ext <- unlist(input$reproj$extent)
+                image_def(i) ## update the image reactive
+                target_crs(input$reproj$crs)
+            }
+        })
+
+        set_crs <- function(crs) evaljs(paste0("cm_", id, ".reproj('", crs, "');")) ## reprojection happens client-side first, then triggers the input$reproj block above
+        get_crs <- reactive(target_crs())
+
+        list(click = mapclick, layer_data = layer_data, set_crs = set_crs, crs = get_crs)
     })
 }
