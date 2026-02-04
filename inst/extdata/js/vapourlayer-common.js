@@ -1,10 +1,35 @@
 var GD = null;
 initGdalJs({ path: 'https://cdn.jsdelivr.net/npm/gdal3.js@2.8.1/dist/package', useWorker: false }).then((Gdal) => { GD = Gdal; });
 
-async function reproj_extent(ex, s_crs, t_crs) {
-    const exy = await GD.gdaltransform([[ex[0], ex[2]], [ex[1], ex[2]], [ex[0], ex[3]], [ex[1], ex[3]]], ["-s_srs", s_crs, "-t_srs", t_crs, "-output_xy"]);
-    return [Math.min(exy[0][0], exy[1][0], exy[2][0], exy[3][0]), Math.max(exy[0][0], exy[1][0], exy[2][0], exy[3][0]),
-            Math.min(exy[0][1], exy[1][1], exy[2][1], exy[3][1]), Math.max(exy[0][1], exy[1][1], exy[2][1], exy[3][1])];
+async function reproj_point(x, s_crs, t_crs) {
+    if (GD === null) { return null; }
+    var tx = await GD.gdaltransform([x], ["-s_srs", s_crs, "-t_srs", t_crs, "-output_xy"]);
+    return tx[0];
+}
+
+async function reproj_extent(ex, s_crs, t_crs, res) {
+    if (GD === null || Math.abs(ex[1] - ex[0]) < 0.001 || Math.abs(ex[3] - ex[2]) < 0.001) { return null; }
+//    var xstep = res / 2; var ystep = res / 2; // can't do this large a grid
+    var xstep = (ex[1] - ex[0]) / 100; var ystep = (ex[3] - ex[2]) / 100;
+    var gxy = Array(1e4);//Math.floor((ex[1] - ex[0]) / xstep) * Math.floor((ex[3] - ex[2]) / ystep));
+    var ii = 0;
+    for (var i = ex[0]; i < ex[1]; i += xstep) {
+        for (var j = ex[2]; j < ex[3]; j += ystep) {
+            gxy[ii] = [i, j];
+            ii++;
+        }
+    }
+    // console.log(gxy.length);
+    // console.log(gxy[gxy.length - 1]);
+    const exy = await GD.gdaltransform(gxy, ["-s_srs", s_crs, "-t_srs", t_crs, "-output_xy"]);
+    var nex = [exy[0][0], exy[0][0], exy[0][1], exy[0][1]];
+    for (ii of exy) {
+        nex[0] = Math.min(nex[0], ii[0]);
+        nex[1] = Math.max(nex[1], ii[0]);
+        nex[2] = Math.min(nex[2], ii[1]);
+        nex[3] = Math.max(nex[3], ii[1]);
+    }
+    return nex;
 }
 
 const is_canvas_blank = function(cvs) {

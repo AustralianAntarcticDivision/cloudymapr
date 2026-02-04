@@ -152,17 +152,21 @@ var cm_$ID$={
     },
 
     async reproj(to_crs) {
-        var cxy = await GD.gdaltransform([this.viewport_ctr], ["-s_srs", this.crs, "-t_srs", to_crs, "-output_xy"]);
-        const exy = await reproj_extent(this.ext, this.crs, to_crs);
-        const mxy = await reproj_extent(this.ext0, this.crs, to_crs);
-        Shiny.setInputValue('$ID$-reproj', {"ctr":cxy[0], "extent":exy, "crs":to_crs});
-        this.crs = to_crs;
-        this.xsc = (exy[1] - exy[0]) / this.image_wh;
-        this.ysc = (exy[3] - exy[2]) / this.image_wh;
-        // this.res = ... don't need to change the resolution?
-        this.viewport_ctr = cxy[0];
-        this.ext = exy;
-        this.ext0 = mxy;
+        if (GD !== null && this.crs != to_crs) {
+            const cxy = await reproj_point(this.viewport_ctr, this.crs, to_crs);
+            const exy = await reproj_extent(this.ext, this.crs, to_crs, this.res);
+            const mxy = await reproj_extent(this.ext0, this.crs, to_crs, this.res);
+            if (cxy !== null && exy !== null && mxy !== null) {
+                Shiny.setInputValue('$ID$-reproj', {"ctr":cxy, "extent":exy, "crs":to_crs});
+                this.crs = to_crs;
+                this.xsc = (exy[1] - exy[0]) / this.image_wh;
+                this.ysc = (exy[3] - exy[2]) / this.image_wh;
+                // this.res = ... don't need to change the resolution?
+                this.viewport_ctr = cxy;
+                this.ext = exy;
+                this.ext0 = mxy;
+            }
+        }
     },
 }
 
