@@ -1,35 +1,35 @@
-## fetch_a_tile_vapour <- function(ext, dsn, res, type, target_crs, warp_opts, resampling, ...) {
-##     if (missing(warp_opts) || length(warp_opts) < 1) warp_opts <- character()
-##     tryCatch({
-##         dt <- if (type == "raster_data") {
-##                   vapour::gdal_raster_data(dsn, target_res = res, target_crs = target_crs, target_ext = ext, resample = resampling, options = warp_opts)
-##               } else if (type == "raster_image_rgb") {
-##                   vapour::gdal_raster_nara(dsn, bands = 1:3, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = resampling, options = warp_opts)
-##               } else {
-##                   ## raster_image_grey
-##                   vapour::gdal_raster_data(dsn, bands = 1, target_res = res, target_crs = target_crs, target_ext = ext, band_output_type = "Byte", resample = resampling, options = warp_opts)
-##               }
-##         list(data = dt, type = type, ...)
-##     }, error = function(e) list(data = NULL, type = type, err = conditionMessage(e), ...))
-## }
-
-fetch_a_tile_gdalraster <- function(ext, dsn, res, type, target_crs, warp_opts, resampling, ...) {
-    if (length(res) == 1) res <- c(res, res)
-    tryCatch({
-        outfile <- tempfile(tmpdir = "/vsimem")
-        ## or warp to a GDALRaster dst_ds <- create("MEM", "", 20, 20, 1, "Byte", return_obj = TRUE)
-        gdalraster::warp(dsn, dst_filename = outfile, t_srs = target_crs, cl_arg = c("-te", ext[1], ext[3], ext[2], ext[4], "-tr", res[1], res[2], "-r", resampling, if (type == "raster_image_rgb") c("-ot", "Byte", "-srcband", 1, "-srcband", 2, "-srcband", 3), if (type == "raster_image_grey") c("-ot", "Byte", "-srcband", 1), warp_opts)) ##, "-multi", "-wo", "NUM_THREADS=ALL_CPUS"))
-        ## -multi
-        ## Use multithreaded warping implementation. Two threads will be used to process chunks of image and perform input/output operation simultaneously. Note that computation is not multithreaded itself. To do that, you can use the ⁠-wo NUM_THREADS=val/ALL_CPUS⁠ option, which can be combined with -multi.
-        ds <- new(gdalraster::GDALRaster, outfile)
-        dt <- gdalraster::read_ds(ds)
-        attr(dt, "extent") <- ext
-        list(data = dt, type = type, ...)
-    }, error = function(e) list(data = NULL, type = type, err = conditionMessage(e), ...))
+image_def_from_view <- function(initial_view, zoom = 1) {
+    ## xy centres of tiles in normalized [-1 1 -1 1] coords
+    temp_xygrid <- expand.grid(x = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side,
+                               y = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side)
+    list(tiles_per_side = initial_view$tiles_per_side,
+         n_tiles = initial_view$tiles_per_side ^ 2,
+         xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords, these do not change (only dependent on n tiles per side)
+         ext = initial_view$extent, ## the extent value is maintained on the client side, and sent here to the server when it changes
+         res = initial_view$res, zoom = zoom)
 }
 
-fetch_a_tile <- fetch_a_tile_gdalraster
-##fetch_a_tile <- fetch_a_tile_vapour
+is_raster_layer <- function(i, lyrdef) { !is.null(lyrdef[[i]]) && "dsn" %in% names(lyrdef[[i]]) }
+
+        ## xy centres of tiles in map coords
+        ext_to_c_mu <- function(extent, tiles_per_side, xygrid) {
+            ## xygrid is normalized coords of centres in [-1 1 -1 1] space
+            if (!missing(xygrid)) {
+                ## this is slower
+                data.frame(x = (xygrid$x + 1) / 2 * diff(extent[1:2]) + extent[1],
+                           y = (xygrid$y + 1) / 2 * diff(extent[3:4]) + extent[3])
+            } else {
+                as.data.frame(expand.grid(x = seq(extent[1], extent[2], length.out = tiles_per_side + 1)[-1] - diff(extent[1:2]) / tiles_per_side / 2,
+                                          y = seq(extent[3], extent[4], length.out = tiles_per_side + 1)[-1] - diff(extent[3:4]) / tiles_per_side / 2))
+            }
+        }
+
+## tile width and height in map units
+tile_wh_mu <- function(ext, tiles_per_side) {
+    c(diff(ext[1:2]), diff(ext[3:4])) / tiles_per_side
+}
+
+xywh_to_ext <- function(x, y, w, h) unname(c(x + c(-1, 1) * w / 2, y + c(-1, 1) * h / 2))
 
 #' Vapourlayer map shiny module
 #'
@@ -91,22 +91,6 @@ vl_map_ui_postamble <- function() {
 #' @rdname vl_map_module
 vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_side = 1L, extent = c(-1, 1, -1, 1) * 2048e4, res = 32e3), layerdef, target_crs = "EPSG:3031", cache = TRUE) {
 
-    ## config
-    .debug <- 1L
-    .clear_canvas_before_drawing <- TRUE ## for vector layers, do we clear the full canvas before replotting?
-    .use_ugd <- FALSE ## for vector layers, use unigd:ugd to generate svg. If FALSE use png format
-    .svg_as_file <- TRUE ## if FALSE, send the svg string directly to the browser as b64-encoded data: but think that using a file is better for caching behaviour
-    .use_fastpng <- TRUE ## if FALSE use png()
-    .png_in_memory <- FALSE
-    .png_compression_level <- 2L ## 0L is no compression, ~0.1s to write a 2500x2500 image (25MB file); 2L ~1.4s for the same image (9.5MB) or ~0.9s with .use_png_filter = FALSE (11MB file)
-    .use_png_filter <- .png_compression_level < 1 ## see fastpng::write_png
-    .plotres <- 96 ## dpi, only used by png graphics device
-    .warp_opts <- c("-wm", "999")
-    .resampling_method <- "near" ## or "bilinear" ## TODO allow this to be specified on a source-by-source basis? Be aware that bilinear sampling can cause issues when the source is raster_data and it has special values like a land mask (255) but valid values are (say) 0-100: interpolation near land will give values > 100 and < 255
-    ## the next two should not ever need to be TRUE any more
-    .clear_on_zoom <- FALSE ## clear plots on zoom? Or leave them visible while refreshing?
-    .clear_on_pan <- FALSE ## clear plots on pan? Or leave them visible while refreshing?
-
     ## initial arg checking
     iv <- initial_view
     if (is.null(iv$tiles_per_side)) iv$tiles_per_side <- 1L
@@ -132,14 +116,11 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         addResourcePath("plots", tmpd)
 
         ## funs
-        is_raster_layer <- function(i) {
-            !is.null(layerdef()[[i]]) && "dsn" %in% names(layerdef()[[i]])
-        }
         which_are_raster_layers <- function() {
-            isolate(which(vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
+            isolate(which(vapply(seq_along(layerdef()), is_raster_layer, lyrdef = layerdef(), FUN.VALUE = TRUE)))
         }
         which_are_vector_layers <- function() {
-            isolate(which(!vapply(seq_along(layerdef()), is_raster_layer, FUN.VALUE = TRUE)))
+            isolate(which(!vapply(seq_along(layerdef()), is_raster_layer, lyrdef = layerdef(), FUN.VALUE = TRUE)))
         }
 
         ## make target crs reactive if needed
@@ -155,24 +136,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 warning("target_crs '", isolate(target_crs()), "' might be invalid")
             }
         })
-
-        ## xy centres of tiles in map coords
-        ext_to_c_mu <- function(extent, tiles_per_side, xygrid) {
-            ## xygrid is normalized coords of centres in [-1 1 -1 1] space
-            if (!missing(xygrid)) {
-                ## this is slower
-                data.frame(x = (xygrid$x + 1) / 2 * diff(extent[1:2]) + extent[1],
-                           y = (xygrid$y + 1) / 2 * diff(extent[3:4]) + extent[3])
-            } else {
-                as.data.frame(expand.grid(x = seq(extent[1], extent[2], length.out = tiles_per_side + 1)[-1] - diff(extent[1:2]) / tiles_per_side / 2,
-                                          y = seq(extent[3], extent[4], length.out = tiles_per_side + 1)[-1] - diff(extent[3:4]) / tiles_per_side / 2))
-            }
-        }
-
-        ## tile width and height in map units
-        tile_wh_mu <- function(ext, tiles_per_side) {
-            c(diff(ext[1:2]), diff(ext[3:4])) / tiles_per_side
-        }
 
         ## generate our image_def from the user-supplied initial_view
         ## initial_view is list(tiles_per_side, extent(xmin, xmax, ymin, ymax), res)
@@ -194,21 +157,8 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             if (any(abs(chk - round(chk)) > 0)) stop("initial_view must define the xy extents to be even multiples of the number of tiles per side")
         }
 
-        ## we will always align our tiles so that they align with (x) initial_view$extent[1] + N * CURRENT_tile_w and (y) initial_view$extent[3] + N * CURRENT_tile_h
-        ##view_ref <- list(x0 = initial_view$extent[1], y0 = initial_view$extent[3], 
-
-        ## xy centres of tiles in normalized [-1 1 -1 1] coords
-        temp_xygrid <- expand.grid(x = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side,
-                                   y = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side)
-        image_def <- reactiveVal(list(tiles_per_side = initial_view$tiles_per_side,
-                                      n_tiles = initial_view$tiles_per_side ^ 2,
-                                      xy_grid = temp_xygrid, ## xy centres of tiles in normalized [-1 1 -1 1] coords, these do not change (only dependent on n tiles per side)
-                                      ext = initial_view$extent, ## the extent value is maintained on the client side, and sent here to the server when it changes
-                                      res = initial_view$res, zoom = 1))
-        ## testing stopifnot(isTRUE(all.equal(as.matrix(ext_to_c_mu(extent = initial_view$extent, xygrid = temp_xygrid)), as.matrix(ext_to_c_mu(extent = initial_view$extent, tiles_per_side = initial_view$tiles_per_side))))) ## as.matrix just to avoid the attributes on the tiles_per_side version
+        image_def <- reactiveVal(image_def_from_view(initial_view, zoom = 1))
         tile_wh <- round(image_wh / initial_view$tiles_per_side) ## in pixels
-
-        xywh_to_ext <- function(x, y, w, h) unname(c(x + c(-1, 1) * w / 2, y + c(-1, 1) * h / 2))
 
         ## set initial scaling parms for conversion of map units to pixels
         init_done <- FALSE
@@ -364,7 +314,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 ##                 }
 ##             }
             ## send tile to canvas
-            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]])
+            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]], cache = cache, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory, tmpd = tmpd)
             if (!is.null(plot_contents)) {
                 iext_mu <- image_def$ext ## data extent in map units
                 tile_ext_mu <- attr(td$img$data[[i]], "extent")
@@ -424,95 +374,11 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             }
         }
 
-        ## render data to png, but with caching
-        tile_to_png <- function(...) {
-            keydata <- list(...)
-            if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
-            keydata$td <- if (keydata$i > length(keydata$td$img$data)) NULL else keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
-            keydata$i <- NULL ## so that if we ask for a tile in slot N that was previously in slot M, the cached copy can be used
-            key <- rlang::hash(keydata)
-            if (!is.null(cache) && cache$exists(key)) {
-                if (file.exists(cache$get(key))) {
-                    message("got cached png: ", cache$get(key))
-                    return(cache$get(key))
-                } else {
-                    cache$remove(key)
-                }
-            }
-            message("no cached png available")
-            pltf <- tile_to_png_inner(...)
-            if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
-            pltf
-        }
-
-        tile_to_png_inner <- function(td, i, layerdef, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory) {
-            if (i > length(td$img$data) || is.null(td$img$data[[i]][[1]])) return(NULL)
-            pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
-            message("rendering raster tile to png:", pltf)
-            if (use_fastpng) {
-                if (layerdef$type == "raster_data") {
-                    zl <- if (is.null(layerdef$zlims[[1]])) stop("need z limits") else layerdef$zlims[[1]]
-                    cmap <- layerdef$cmap[[1]]
-                    ## construct matrix
-                    if (!is.null(attr(td$img$data[[i]], "gis"))) {
-                        ## gdalraster format
-                        tdim <- attr(td$img$data[[i]], "gis")$dim
-                        m <- t(matrix(td$img$data[[i]], nrow = tdim[1]))
-                    } else {
-                        tdim <- attr(td$img$data[[i]], "dimension")
-                        m <- matrix(td$img$data[[i]][[1]], nrow = tdim[2], byrow = TRUE)
-                    }
-                    ## scale by given zlim and then map to colour range, using zero-based indexing
-                    m <- pmax(pmin(round((m - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L
-                    ## any NA/NaN's will still be present, make them transparent
-                    cmap <- c(cmap, "#FFFFFF00") ## transparent
-                    m[is.na(m)] <- length(cmap) - 1L
-                    rgs <- list(m, palette = cmap, file = pltf, compression_level = png_compression_level, use_filter = use_png_filter)
-                } else if (layerdef$type == "raster_image_grey") {
-                    ## greyscale image
-                    if (!is.null(attr(td$img$data[[i]], "gis"))) {
-                        ## gdalraster format
-                        tdim <- attr(td$img$data[[i]], "gis")$dim
-                        dat <- t(matrix(td$img$data[[i]], nrow = tdim[1]))
-                    } else {
-                        tdim <- attr(td$img$data[[i]], "dimension")
-                        dat <- as.vector(td$img$data[[i]][[1]])
-                    }
-                    rgs <- list(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 1, bits = 8), use_filter = use_png_filter)
-                } else {
-                    ## image or rgb
-                    nara <- inherits(td$img$data[[i]][[1]], "nativeRaster")
-                    if (nara) {
-                        ## native raster via vapour
-                        tdim <- attr(td$img$data[[i]], "dimension")
-                        dat <- td$img$data[[i]][[1]]
-                    } else if (!is.null(attr(td$img$data[[i]], "gis"))) {
-                        ## gdalraster rgb format
-                        tdim <- attr(td$img$data[[i]], "gis")$dim
-                        dat <- aperm(array(td$img$data[[i]], dim = c(tdim[1:2], 3)), c(2, 1, 3))
-                    } else {
-                        ## rgb raster via vapour
-                        tdim <- attr(td$img$data[[i]], "dimension")
-                        dat <- as.vector(matrix(unlist(td$img$data[[i]][[1]]), byrow = TRUE, nrow = 3))
-                    }
-                    rgs <- list(dat, file = pltf, compression_level = png_compression_level, raw_spec = fastpng::raw_spec(width = tdim[1], height = tdim[2], depth = 3, bits = 8), use_filter = use_png_filter)
-                }
-                if ("extra_args" %in% names(layerdef) && !is.null(layerdef$extra_args[[1]])) rgs <- c(rgs, layerdef$extra_args[[1]])
-                if (.debug > 1) temp <- proc.time()["elapsed"]
-                pltf <- do.call(fastpng::write_png, rgs)
-                if (.debug > 1) message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!.png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
-            } else {
-                stop("not coded")
-            }
-            pltf
-        }
-
-        update_tiles_data <- function(t, z = 1) {
+        update_tiles_data <- function(imgdef, z = 1) {
             cat("--> in update_tiles_data() for layer", z, "\n")
             isolate({
                 ## cat("updating tiles data for z =", utils::capture.output(utils::str(z)), "\n")
-                ## t here is image_def()
-                xy_hash <- rlang::hash(list(t, layerdef()[[z]])) ##^^^ is xy_hash needed/used??
+                xy_hash <- rlang::hash(list(imgdef, layerdef()[[z]])) ##^^^ is xy_hash needed/used??
                 saved_hash <- isolate(tiles_data())[[z]]$xy_hash
                 cat("xy_hash is:", xy_hash, ", saved hash is:", saved_hash, "\n")
                 if (identical(xy_hash, saved_hash)) {
@@ -520,38 +386,39 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 } else {
                     cat("updating tiles_data", z, "\n")
                     ## generate new IDs, one per tile
-                    ids <- uuid::UUIDgenerate(n = nrow(t$xy_grid))
+                    ids <- uuid::UUIDgenerate(n = nrow(imgdef$xy_grid))
                     td <- isolate(tiles_data())
-                    td[[z]]$img <- list(ids = ids, data = rep(list(NULL), nrow(t$xy_grid)), xy_hash = xy_hash, data_hash = "") ##IMSRC src = rep(NA_character_, nrow(t$xy_grid)),
+                    td[[z]]$img <- list(ids = ids, data = rep(list(NULL), nrow(imgdef$xy_grid)), xy_hash = xy_hash, data_hash = "") ##IMSRC src = rep(NA_character_, nrow(imgdef$xy_grid)),
                     tiles_data(td)
                     ld <- layerdef()[[z]]
-                    for (i in seq_len(nrow(t$xy_grid))) mirai_fetch_tile(t, z, ids, i)
+                    for (i in seq_len(nrow(imgdef$xy_grid))) mirai_fetch_tile(imgdef, z, ids, i)
                 }
             })
         }
 
         mirai_queue <- list()
-        mirai_fetch_tile <- function(t, z, ids, i) {
-            ## t here is image_def()
-            xy <- ext_to_c_mu(extent = t$ext, tiles_per_side = t$tiles_per_side)
-            twh <- tile_wh_mu(ext = t$ext, tiles_per_side = t$tiles_per_side)
+        mirai_fetch_tile <- function(imgdef, z, ids, i) {
+            xy <- ext_to_c_mu(extent = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
+            twh <- tile_wh_mu(ext = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             this_ext <- xywh_to_ext(x = xy$x[i], y = xy$y[i], w = twh[1], h = twh[2])
-            cat("fetching data: ext ", this_ext, ", res ", t$res, "\n")
+            cat("fetching data: ext ", this_ext, ", res ", imgdef$res, "\n")
             ld <- layerdef()[[z]]
-            rgs <- list(ext = this_ext, z = z, dsn = ld$dsn, res = t$res, type = ld$type, target_crs = target_crs(), warp_opts = .warp_opts, resampling = .resampling_method)
-            key <- rlang::hash(rgs)
+            rgs <- list(ext = this_ext, dsn = ld$dsn, res = imgdef$res, type = ld$type, target_crs = target_crs(), warp_opts = .warp_opts, resampling = .resampling_method)
+            key <- key_from_args(rgs)
             if (!is.null(cache) && cache$exists(key)) {
                 result <- cache$get(key)
                 result$i <- i
                 result$id <- ids[i]
-                if (.debug > 2) message("got cached data for layer ", result$z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
+                result$z <- z
+                if (.debug > 2) message("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
                 handle_tile_data(result)
             } else {
+                if (.debug > 2) message("key ", key, " not in cache")
                 ## if a fetch request is already happening with this key, don't re-issue a new fetch request
                 if (key %in% sapply(mirai_queue, function(job) job$key)) {
                     ## cat("request with key", key, "is already in the queue, not re-queueing\n")
                 } else {
-                    rgs <- c(rgs, list(i = i, id = ids[i], key = key))
+                    rgs <- c(rgs, list(z = z, i = i, id = ids[i], key = key))
                     ## cat("fetching:\n"); cat(utils::str(rgs))
                     ##if (.debug > 1)
                     if (.debug > 2) temp <- proc.time()["elapsed"]
@@ -584,7 +451,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                         done <- c(done, ji)
                         if (.debug > 2) message("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
                         if (!mirai::is_mirai_error(result)) {
-                            if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("i", "id", "key"))]) ## cache it
+                            if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("z", "i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
                         } else {
                             cat("async data failed: ", result, "\n")
