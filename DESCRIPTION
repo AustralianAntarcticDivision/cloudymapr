@@ -40,4 +40,4 @@ RoxygenNote: 7.3.2
 X-schema.org-applicationCategory: Antarctic/Southern Ocean
 X-schema.org-keywords: Antarctic, Southern Ocean, mapping
 X-schema.org-isPartOf: https://antarctica.gov.au, https://scar.org
-Remotes: hypertidy/sds
+Remotes: hypertidy/sds, nx10/unigd
