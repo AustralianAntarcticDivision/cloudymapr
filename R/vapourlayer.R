@@ -185,7 +185,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         ## this doesn't need to be reactive, it only relies on constants (image_wh, id) and the dom being initialized, which it will be by the time this is called
         ## set the canvas sizes and store array of contexts
         evaljs(paste0("$('#", id, "-pannable').width('", image_wh, "px').height('", image_wh, "px'); ",
-                      id, "_ctxlist = []; for (let i = 1; i <= 9; i++) { var this_ctx = document.getElementById('", id, "-plot' + i).getContext('2d'); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, "; ", id, "_ctxlist[i] = this_ctx; }"))
+                      id, "_ctxlist = []; for (let i = 1; i <= 9; i++) { var this_ctx = document.getElementById('", id, "-plot' + i).getContext('2d', { willReadFrequently: true }); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, "; ", id, "_ctxlist[i] = this_ctx; }"))
 
         observeEvent(input$do_zoom, {
             cat("do_zoom: ", input$do_zoom, "\n")
@@ -239,8 +239,14 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         tiles_data <- reactiveVal(rep(list(list(img = NULL)), 9)) ## the tiles for each layer, as will be fetched with gdal
         layer_data <- lapply(1:9, function(z) {
             reactive({
-                if (isTRUE(isolate(layerdef()[[z]])$type %in% c("raster_data", "raster_image_grey"))) {
-                    terra::rast(tiles_to_matrix(tiles_data()[[z]]$img$data), crs = target_crs(), extent = image_def()$ext)
+                if (z > length(layerdef())) {
+                    NULL
+                } else if (isTRUE(isolate(layerdef()[[z]])$type %in% c("raster_data", "raster_image_grey"))) {
+                    if (is.null(tiles_data()[[z]]$img$data)) {
+                        NULL
+                    } else {
+                        tryCatch(terra::rast(tiles_to_matrix(tiles_data()[[z]]$img$data), crs = target_crs(), extent = image_def()$ext), error = function(e) NULL)
+                    }
                 } else {
                     ## TODO other image types. RGB should be able to return RGB colours as a 3-band raster
                     NULL
@@ -257,16 +263,25 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         }
 
         tiles_to_matrix <- function(td_img_data) {
+            gdr_format <- FALSE ## gdalraster format?
             tdim <- Filter(Negate(is.null), lapply(td_img_data, attr, "dimension"))
+            if (length(tdim) < 1) {
+                tdim <- Filter(Negate(is.null), lapply(td_img_data, function(tld) attr(tld, "gis")$dim))
+                gdr_format <- TRUE
+            }
             tdim <- if (length(tdim) > 0) tdim[[1]] else return(NULL) ## if we have no dimension, we can't build the matrix
-            m1 <- function(z) matrix(if (is.null(z)) NA_real_ else if (is.raw(z)) as.integer(z) else z, nrow = tdim[2], ncol = tdim[1], byrow = TRUE) ## matrix constructor
+            if (gdr_format) {
+                m1 <- function(z) t(matrix(if (is.null(z)) NA_real_ else if (is.raw(z)) as.integer(z) else z, nrow = tdim[1])) ## matrix constructor
+            } else {
+                m1 <- function(z) matrix(if (is.null(z)) NA_real_ else if (is.raw(z)) as.integer(z) else z, nrow = tdim[2], ncol = tdim[1], byrow = TRUE) ## matrix constructor
+            }
             idef <- isolate(image_def())
             n <- idef$tiles_per_side ## image is composed of a square arrangement of tiles (which may be only one tile)
             ord <- order(idef$xy_grid$x, -idef$xy_grid$y) ## tile ordering
             if (.debug > 1) temp <- proc.time()["elapsed"]
             out <- do.call(cbind, lapply(seq_len(n), function(ci) {
                 do.call(rbind, lapply((ci - 1) * n + seq_len(n), function(ri) {
-                    m1(td_img_data[[ord[ri]]][[1]])
+                    m1(if (gdr_format) td_img_data[[ord[ri]]] else td_img_data[[ord[ri]]][[1]])
                 }))
             }))
             if (.debug > 1) {

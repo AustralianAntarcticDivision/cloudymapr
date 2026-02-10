@@ -4,7 +4,7 @@ async function pan_canvases(cm, srcx, srcy, srcw, srch, destx, desty, destw, des
     var octx = ocv.getContext('2d');
     for (const idx of cm.active_layers) {
         var this_ctx = ctxlist[idx];
-        if (!is_canvas_blank(this_ctx.canvas)) {
+        if (!is_canvas_blank(this_ctx.canvas, this_ctx)) {
             // draw to offscreen canvas
             octx.clearRect(0, 0, cm.image_wh, cm.image_wh);
             octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, destx, desty, destw, desth);

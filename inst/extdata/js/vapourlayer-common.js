@@ -32,8 +32,7 @@ async function reproj_extent(ex, s_crs, t_crs, res) {
     return nex;
 }
 
-const is_canvas_blank = function(cvs) {
-    const context = cvs.getContext('2d');
+const is_canvas_blank = function(cvs, context) {
     const pixelBuffer = new Uint32Array(
         context.getImageData(0, 0, cvs.width, cvs.height).data.buffer
     );
@@ -96,7 +95,7 @@ const redraw_zoomed = function(cm, ext0, zoom_in) {
     }
     for (const idx of cm.active_layers) {
         var this_ctx = ctxlist[idx];
-        if (!is_canvas_blank(this_ctx.canvas)) {
+        if (!is_canvas_blank(this_ctx.canvas, this_ctx)) {
             // draw to offscreen canvas
             octx.clearRect(0, 0, cm.image_wh, cm.image_wh);
             octx.drawImage(this_ctx.canvas, srcx, srcy, srcw, srch, destx, desty, destw, desth);
