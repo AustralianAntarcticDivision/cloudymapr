@@ -6,7 +6,7 @@
 #' @aliases cloudymapr-package
 #' @docType package
 #' @importFrom abind abind
-#' @importFrom dplyr across bind_cols everything mutate tribble
+#' @importFrom dplyr across bind_cols bind_rows everything mutate tibble tribble
 #' @importFrom graphics par points text
 #' @importFrom grDevices col2rgb dev.off hcl.colors png
 #' @importFrom leaflet addTiles addWMSTiles leaflet leafletCRS leafletOptions setView tileOptions WMSTileOptions

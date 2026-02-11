@@ -36,8 +36,15 @@ tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression
                 tdim <- attr(td$img$data[[i]], "dimension")
                 m <- matrix(td$img$data[[i]][[1]], nrow = tdim[2], byrow = TRUE)
             }
-            ## scale by given zlim and then map to colour range, using zero-based indexing
-            m <- pmax(pmin(round((m - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L
+            cmap <- layerdef$cmap[[1]]
+            if (is.function(cmap)) {
+                temp <- cmap(m, zlim = zl) ## returns a list with palette indices and palette
+                cmap <- temp[[2]]
+                m <- matrix(temp[[1]] - 1L, nrow = nrow(m)) ## zero-based
+            } else {
+                ## scale by given zlim and then map to colour range, using zero-based indexing
+                m <- pmax(pmin(round((m - zl[1]) / abs(diff(zl)) * (length(cmap) - 1L)) + 1L, length(cmap)), 1L) - 1L
+            }
             ## any NA/NaN's will still be present, make them transparent
             cmap <- c(cmap, "#FFFFFF00") ## transparent
             m[is.na(m)] <- length(cmap) - 1L
