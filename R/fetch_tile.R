@@ -14,6 +14,18 @@
 ## }
 
 fetch_a_tile_gdalraster <- function(ext, dsn, res, type, target_crs, warp_opts, resampling, ...) {
+    ## https://gdalcubes.github.io/source/concepts/config.html#recommended-settings-for-cloud-access
+    gdalraster::set_config_option("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
+    gdalraster::set_config_option("VSI_CACHE", "TRUE")
+    gdalraster::set_config_option("GDAL_CACHEMAX","30%")
+    gdalraster::set_config_option("VSI_CACHE_SIZE","10000000")
+    gdalraster::set_config_option("GDAL_HTTP_MULTIPLEX","YES")
+    gdalraster::set_config_option("GDAL_INGESTED_BYTES_AT_OPEN","128000") ## was 32k
+    gdalraster::set_config_option("GDAL_HTTP_VERSION","2")
+    gdalraster::set_config_option("GDAL_HTTP_MERGE_CONSECUTIVE_RANGES","YES")
+    gdalraster::set_config_option("GDAL_NUM_THREADS", "ALL_CPUS")
+    ## note that CPL_DEBUG seems to cause segfaults
+    ## if (debug > 1) gdalraster::set_config_option("CPL_DEBUG", "ON") ##else gdalraster::set_config_option("CPL_DEBUG", "OFF")
     if (length(res) == 1) res <- c(res, res)
     tryCatch({
         outfile <- tempfile(tmpdir = "/vsimem")

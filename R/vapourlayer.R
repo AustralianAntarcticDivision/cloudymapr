@@ -299,6 +299,17 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             }
         }
 
+        ## trigger the drawing of a layer's tiles when its tiles_data changes and/or its layerdef changes (e.g. zlim)
+        ## TODO make layerdef reactive to each layer separately so that every layer isn't redrawn when one part of layerdef changes
+        for (tii in 1:9) {
+            local({
+                ti <- force(tii)
+                observeEvent(list(tiles_data[[as.character(ti)]], layerdef()), {
+                    for (i in seq_along(tiles_data[[as.character(ti)]]$img$data)) isolate(draw_tile(z = 1L, td = tiles_data[[as.character(ti)]], i = i, image_def = image_def(), layerdef = layerdef()))
+                })
+            })
+        }
+
         draw_tile <- function(z, td, i, image_def, layerdef, clear = TRUE, as = "file") {
             message("draw_tile for layer ", z, ", index ", i)
             ## z is the layer index (e.g. into tiles_data
