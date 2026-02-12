@@ -24,13 +24,42 @@ vl_demo <- function() {
     bluemap <- grDevices::colorRampPalette(c("#54A3D1", "#60B3EB", "#78C8F0", "#98D1F5", "#B5DCFF", "#BDE1F0", "#CDEBFA", "#D6EFFF", "#EBFAFF","grey99", "grey90", "grey92", "grey94", "grey96", "white"))(100)
     sstmap <- pals::ocean.thermal(100)
 
+    ## custom colourmap function that keeps a fixed blue-to-grey transition at an elevation value of 0, and constrains the colour range to max limits of c(-8000, 5000)
+    ## function needs to return a list: first element is `x` converted to 1-based palette indices, and the second element is the palette
+    bluemap_water <- grDevices::colorRampPalette(c("#54A3D1", "#60B3EB", "#78C8F0", "#98D1F5", "#B5DCFF", "#BDE1F0", "#CDEBFA", "#D6EFFF", "#EBFAFF","grey99"))(51)
+    bluemap_land <- grDevices::colorRampPalette(c("grey99", "grey90", "grey92", "grey94", "grey96", "white"))(50)
+    bluemap_f <- function(x, zlim) {
+        ## water, blues
+        zl <- pmax(pmin(zlim, 0), -8000)
+        c1 <- if (any(zlim < 0) && diff(zl) > 0) {
+                  brks <- seq(zl[1], zl[2], length.out = length(bluemap_water))
+                  if (zlim[1] < 0) brks[1] <- -Inf ## ensure that scale is open-ended on the left
+                  .bincode(x, breaks = brks, right = FALSE)
+              } else {
+                  rep(NA_integer_, length(x))
+              }
+        ## land, greys
+        zl <- pmin(pmax(zlim, 0), 5000)
+        c2 <- if (any(zlim >= 0)) {
+                  brks <- seq(zl[1], zl[2], length.out = length(bluemap_land) + 1)
+                  if (zlim[2] > 0) brks[length(brks)] <- Inf
+                  .bincode(x, breaks = brks, include.lowest = TRUE)
+              } else {
+                  rep(NA_integer_, length(x))
+              }
+        out <- ifelse(is.na(c1), c2 + length(bluemap_water) - 1L, c1)
+        ## note that if the min and max of `domain` are the same value, values outside of that range will be given a non-NA colour. Override that here
+        out[x > zlim[2] | x < zlim[1]] <- NA_integer_
+        list(out, c(utils::head(bluemap_water, -1), bluemap_land))
+    }
+
     ## env/background layers
     raster_cat <- tribble(~type, ~name, ~dsn, ~cmap, ~zlims, ~extra_args,
                           "raster_image_rgb", "EO Basemap", "/vsicurl/https://data.raadsync.cloud.edu.au/raad/public/idea.public/basemap/vlrast_eo.tif", NULL, NULL, NULL,
                           "raster_image_rgb", "ESRI Basemap", "WMTS:http://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/WMTS/1.0.0/WMTSCapabilities.xml", NULL, NULL, NULL,
                           "raster_image_rgb", "BAS Basemap", "WMTS:https://tiles.arcgis.com/tiles/tPxy1hrFDhJfZ0Mf/arcgis/rest/services/Antarctica_and_the_Southern_Ocean/MapServer/WMTS/1.0.0/WMTSCapabilities.xml", NULL, NULL, NULL,
                           "raster_image_grey", "REMA Hillshade", "/vsicurl/https://data.raadsync.cloud.edu.au/raad/public/idea.public/basemap/rema_mosaic_100m_v2.0_filled_cop30_browse.tif", NULL, NULL, list(trns = 0), ## range 1-255, nodata = 0 gray.colors(101, start = 0, end = 1)
-                          "raster_data", "GEBCO DEM", sds::gebco23(), bluemap, c(-8000, 5000), NULL,
+                          "raster_data", "GEBCO DEM", sds::gebco23(), bluemap_f, c(-8000, 5000), NULL,
                           "raster_data", "NSIDC Sea Ice", sds::nsidc_seaice(as.Date("2024-02-07")), c(hcl.colors(100, "Blue-Yellow 2"), c("#FFFFFF00")), c(0, 1001), NULL,
                           "raster_data", "Predator bioregions", "/vsicurl/https://data.source.coop/scar/distant/reisinger_et_al-2022/Re2022-bioregions_cog.tif", pals::glasbey(17), c(1, 17), NULL,
                           "raster_data", "GHRSST", "/vsicurl/https://data.raadsync.cloud.edu.au/raad/public/idea.public/ghrsst/2023/20230101090000-JPL-L4_GHRSST-SSTfnd-MUR-GLOB-v02.0-fv04.1.tif", sstmap, c(-1.8, 25), NULL,
@@ -142,6 +171,24 @@ vl_demo <- function() {
                                      val
                                  }))
             })
+        })
+
+        ## auto-scale the colour limits for the bathymetry
+        layerdef_trigger <- reactiveVal(0L)
+        bathy_zlim <- raster_cat$zlims[[which(raster_cat$name == "GEBCO DEM")]]
+        observe({
+            if (isTRUE(input$bg == "GEBCO DEM")) {
+                dat <- vl_obj$layer_data[[1]]() ## react to this
+                if (!is.null(dat)) {
+                    zlim <- pmin(pmax(-8000, as.numeric(terra::minmax(dat))), 5000)
+                    cat("bathymetry data range:", zlim, "\n")
+                    if (!isTRUE(all(zlim == bathy_zlim))) { ## don't trigger layerdef to update unless the limits have actually changed
+                        raster_cat$zlims[[which(raster_cat$name == "GEBCO DEM")]] <<- zlim
+                        bathy_zlim <<- zlim
+                        layerdef_trigger(isolate(layerdef_trigger()) + 1L)
+                    }
+                }
+            }
         })
     }
 

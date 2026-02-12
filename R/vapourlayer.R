@@ -401,23 +401,23 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 ## cat("updating tiles data for z =", utils::capture.output(utils::str(z)), "\n")
                 xy_hash <- rlang::hash(list(imgdef, layerdef()[[z]])) ##^^^ is xy_hash needed/used??
                 saved_hash <- isolate(tiles_data[[as.character(z)]])$xy_hash
-                cat("xy_hash is:", xy_hash, ", saved hash is:", saved_hash, "\n")
+                if (.debug > 1) message("xy_hash is: ", xy_hash, ", saved hash is: ", saved_hash)
                 if (identical(xy_hash, saved_hash)) {
-                    cat("not updating tiles_data", z, "- xy_hash is unchanged\n")
+                    if (.debug > 1) message("not updating tiles_data ", z, " - xy_hash is unchanged")
                 } else {
-                    cat("updating tiles_data", z, "\n")
+                    if (.debug > 1) message("updating tiles_data ", z)
                     ## generate new IDs, one per tile
                     ids <- uuid::UUIDgenerate(n = nrow(imgdef$xy_grid))
                     td <- isolate(tiles_data[[as.character(z)]])
                     td$img <- list(ids = ids, data = rep(list(NULL), nrow(imgdef$xy_grid)), xy_hash = xy_hash, data_hash = "")
                     tiles_data[[as.character(z)]] <- td
                     ld <- layerdef()[[z]]
-                    for (i in seq_len(nrow(imgdef$xy_grid))) outer_fetch_tile(imgdef, z, ids, i, use_mirai = FALSE)
+                    for (i in seq_len(nrow(imgdef$xy_grid))) outer_fetch_tile(imgdef, z, ids, i, use_mirai = TRUE)
                 }
             })
         }
 
-        outer_fetch_tile <- function(imgdef, z, ids, i, use_mirai) {
+        outer_fetch_tile <- function(imgdef, z, ids, i, use_mirai = TRUE) {
             xy <- ext_to_c_mu(extent = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             twh <- tile_wh_mu(ext = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             this_ext <- xywh_to_ext(x = xy$x[i], y = xy$y[i], w = twh[1], h = twh[2])
