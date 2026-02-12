@@ -236,16 +236,16 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             vector_plot_sources[plotnum] <<- NA_character_
         }
 
-        tiles_data <- reactiveVal(rep(list(list(img = NULL)), 9)) ## the tiles for each layer, as will be fetched with gdal
+        tiles_data <- do.call(reactiveValues, setNames(rep(list(list(img = NULL)), 9), as.character(1:9))) ## the tiles for each layer, as will be fetched with gdal
         layer_data <- lapply(1:9, function(z) {
             reactive({
                 if (z > length(layerdef())) {
                     NULL
-                } else if (isTRUE(isolate(layerdef()[[z]])$type %in% c("raster_data", "raster_image_grey"))) {
-                    if (is.null(tiles_data()[[z]]$img$data)) {
+                } else if (isTRUE(layerdef()[[z]]$type %in% c("raster_data", "raster_image_grey"))) {
+                    if (is.null(tiles_data[[as.character(z)]]$img$data)) {
                         NULL
                     } else {
-                        tryCatch(terra::rast(tiles_to_matrix(tiles_data()[[z]]$img$data), crs = target_crs(), extent = image_def()$ext), error = function(e) NULL)
+                        tryCatch(terra::rast(tiles_to_matrix(tiles_data[[as.character(z)]]$img$data), crs = target_crs(), extent = image_def()$ext), error = function(e) NULL)
                     }
                 } else {
                     ## TODO other image types. RGB should be able to return RGB colours as a 3-band raster
@@ -256,9 +256,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 
         clear_tiles_data <- function(z) {
             if (missing(z)) z <- which_are_raster_layers()
-            td <- isolate(tiles_data())
-            for (i in z) td[[i]] <- list(img = NULL)
-            tiles_data(td)
+            for (i in z) tiles_data[[as.character(i)]] <- list(img = NULL)
             clear_plot(z)
         }
 
@@ -292,22 +290,19 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         }
 
         handle_tile_data <- function(result) {
-            td <- isolate(tiles_data()) ## tiles for all layers
-            td2 <- td[[result$z]] ## tiles for layer z
+            td2 <- isolate(tiles_data[[as.character(result$z)]]) ## tiles for layer z
             if (result$id %in% td2$img$ids) {
                 i <- which(result$id == td2$img$ids)
                 td2$img$data[[i]] <- result$data
                 td2$img$data_hash <- rlang::hash(td2$img$data)
-                td[[result$z]] <- td2
-                tiles_data(td)
-                isolate(draw_tile(z = result$z, td = td2, i = i, image_def = image_def(), layerdef = layerdef()))
+                tiles_data[[as.character(result$z)]] <- td2
             }
         }
 
         draw_tile <- function(z, td, i, image_def, layerdef, clear = TRUE, as = "file") {
             message("draw_tile for layer ", z, ", index ", i)
-            ## z is the layer index (e.g. into tiles_data()
-            ## td is that tiles_data() entry
+            ## z is the layer index (e.g. into tiles_data
+            ## td is that tiles_data entry
             ## i is the index within the layer (> 1 if we have multiple tiles per side)
 ## this should not be needed now because we do an initial re-draw of each canvas on the client side after panning or zooming
 ##             if (clear) {
@@ -329,7 +324,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 ##                 }
 ##             }
             ## send tile to canvas
-            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]], cache = cache, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory, tmpd = tmpd)
+            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]], cache = cache, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory, debug = .debug, tmpd = tmpd)
             if (!is.null(plot_contents)) {
                 iext_mu <- image_def$ext ## data extent in map units
                 tile_ext_mu <- attr(td$img$data[[i]], "extent")
@@ -394,7 +389,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             isolate({
                 ## cat("updating tiles data for z =", utils::capture.output(utils::str(z)), "\n")
                 xy_hash <- rlang::hash(list(imgdef, layerdef()[[z]])) ##^^^ is xy_hash needed/used??
-                saved_hash <- isolate(tiles_data())[[z]]$xy_hash
+                saved_hash <- isolate(tiles_data[[as.character(z)]])$xy_hash
                 cat("xy_hash is:", xy_hash, ", saved hash is:", saved_hash, "\n")
                 if (identical(xy_hash, saved_hash)) {
                     cat("not updating tiles_data", z, "- xy_hash is unchanged\n")
@@ -402,21 +397,20 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     cat("updating tiles_data", z, "\n")
                     ## generate new IDs, one per tile
                     ids <- uuid::UUIDgenerate(n = nrow(imgdef$xy_grid))
-                    td <- isolate(tiles_data())
-                    td[[z]]$img <- list(ids = ids, data = rep(list(NULL), nrow(imgdef$xy_grid)), xy_hash = xy_hash, data_hash = "") ##IMSRC src = rep(NA_character_, nrow(imgdef$xy_grid)),
-                    tiles_data(td)
+                    td <- isolate(tiles_data[[as.character(z)]])
+                    td$img <- list(ids = ids, data = rep(list(NULL), nrow(imgdef$xy_grid)), xy_hash = xy_hash, data_hash = "")
+                    tiles_data[[as.character(z)]] <- td
                     ld <- layerdef()[[z]]
-                    for (i in seq_len(nrow(imgdef$xy_grid))) mirai_fetch_tile(imgdef, z, ids, i)
+                    for (i in seq_len(nrow(imgdef$xy_grid))) outer_fetch_tile(imgdef, z, ids, i, use_mirai = FALSE)
                 }
             })
         }
 
-        mirai_queue <- list()
-        mirai_fetch_tile <- function(imgdef, z, ids, i) {
+        outer_fetch_tile <- function(imgdef, z, ids, i, use_mirai) {
             xy <- ext_to_c_mu(extent = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             twh <- tile_wh_mu(ext = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             this_ext <- xywh_to_ext(x = xy$x[i], y = xy$y[i], w = twh[1], h = twh[2])
-            cat("fetching data: ext ", this_ext, ", res ", imgdef$res, "\n")
+            if (.debug > 1) message("fetching data: ext ", this_ext, ", res ", imgdef$res)
             ld <- layerdef()[[z]]
             rgs <- list(ext = this_ext, dsn = ld$dsn, res = imgdef$res, type = ld$type, target_crs = target_crs(), warp_opts = .warp_opts, resampling = .resampling_method)
             key <- key_from_args(rgs)
@@ -429,26 +423,40 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 handle_tile_data(result)
             } else {
                 if (.debug > 2) message("key ", key, " not in cache")
-                ## if a fetch request is already happening with this key, don't re-issue a new fetch request
-                if (key %in% sapply(mirai_queue, function(job) job$key)) {
-                    ## cat("request with key", key, "is already in the queue, not re-queueing\n")
-                } else {
+                if (use_mirai) {
                     rgs <- c(rgs, list(z = z, i = i, id = ids[i], key = key))
-                    ## cat("fetching:\n"); cat(utils::str(rgs))
-                    ##if (.debug > 1)
-                    if (.debug > 2) temp <- proc.time()["elapsed"]
-                    if (!"cloudymapr" %in% rownames(utils::installed.packages())) {
-                        ## local dev without package being installed
-                        mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
-                    } else {
-                        mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs) ## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
-                    }
-                    if (.debug > 2) {
-                        temp <- proc.time()["elapsed"] - temp
-                        message("mirai dispatch time: ", round(temp, 3), "s")
-                    }
-                    if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
+                    mirai_fetch_tile(rgs, key)
+                } else {
+                    ## do the fetch synchronously
+                    result <- do.call(fetch_a_tile, c(rgs, list(z = z)))
+                    result$i <- i
+                    result$id <- ids[i]
+                    result$z <- z
+                    handle_tile_data(result)
                 }
+            }
+        }
+
+        mirai_queue <- list()
+        mirai_fetch_tile <- function(rgs, key) {
+            ## if a fetch request is already happening with this key, don't re-issue a new fetch request
+            if (key %in% sapply(mirai_queue, function(job) job$key)) {
+                ## cat("request with key", key, "is already in the queue, not re-queueing\n")
+            } else {
+                ## cat("fetching:\n"); cat(utils::str(rgs))
+                ##if (.debug > 1)
+                if (.debug > 2) temp <- proc.time()["elapsed"]
+                if (!"cloudymapr" %in% rownames(utils::installed.packages())) {
+                    ## local dev without package being installed
+                    mid <- mirai::mirai(do.call(fetch_a_tile, rgs), rgs = rgs, fetch_a_tile = fetch_a_tile)
+                } else {
+                    mid <- mirai::mirai(do.call(cloudymapr:::fetch_a_tile, rgs), rgs = rgs) ## don't pass the function here, it's super slow, fetch_a_tile = fetch_a_tile)
+                }
+                if (.debug > 2) {
+                    temp <- proc.time()["elapsed"] - temp
+                    message("mirai dispatch time: ", round(temp, 3), "s")
+                }
+                if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
             }
         }
 
@@ -498,7 +506,6 @@ cat("--> in vector layer plotter\n")
                 pltf <- tempfile(tmpdir = tmpd, fileext = if (.use_ugd) ".svg" else ".png")
                 cat("rendering plot", i, "layer", z, "as", if (.use_ugd && .svg_as_file) paste("svg file", pltf) else if (.use_ugd) "svg" else paste("png", pltf), "\n")
                 ##tictoc::tic()
-                ##IMSRC need to keep track of pltf for each non-raster source as well
                 if (!.use_ugd) {
                     png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
                 } else {
