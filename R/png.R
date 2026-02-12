@@ -4,18 +4,19 @@ tile_to_png <- function(..., cache, res, use_fastpng, png_compression_level, use
     if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
     keydata$td <- if (keydata$i > length(keydata$td$img$data)) NULL else keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
     keydata$i <- NULL ## so that if we ask for a tile in slot N that was previously in slot M, the cached copy can be used
-    key <- rlang::hash(keydata)
-    if (!is.null(cache) && cache$exists(key)) {
-        if (file.exists(cache$get(key))) {
-            if (debug > 0) message("got cached png: ", cache$get(key))
-            return(cache$get(key))
-        } else {
-            cache$remove(key)
-        }
-    }
-    if (debug > 0) message("no cached png available")
+    ## for now, no caching of pngs because changes in zlim are not always being correctly handled
+    ## key <- rlang::hash(keydata)
+    ## if (!is.null(cache) && cache$exists(key)) {
+    ##     if (file.exists(cache$get(key))) {
+    ##         if (debug > 0) message("got cached png with key: ", key)
+    ##         return(cache$get(key))
+    ##     } else {
+    ##         cache$remove(key)
+    ##     }
+    ## }
+    ## if (debug > 0) message("no cached png available")
     pltf <- tile_to_png_inner(..., res = res, use_fastpng = use_fastpng, png_compression_level = png_compression_level, use_png_filter = use_png_filter, png_in_memory = png_in_memory, debug = debug, tmpd = tmpd)
-    if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
+    ## if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
     pltf
 }
 
@@ -26,7 +27,7 @@ tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression
     if (use_fastpng) {
         if (layerdef$type == "raster_data") {
             zl <- if (is.null(layerdef$zlims[[1]])) stop("need z limits") else layerdef$zlims[[1]]
-            if (debug > 0) message("  zlim is:", zl, "\n")
+            if (debug > 0) message("  zlim is:", zl[1], " to ", zl[2], "\n")
             ## construct matrix
             if (!is.null(attr(td$img$data[[i]], "gis"))) {
                 ## gdalraster format
