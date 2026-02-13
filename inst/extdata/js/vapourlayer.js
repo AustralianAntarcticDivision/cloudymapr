@@ -156,12 +156,15 @@ var cm_$ID$={
             const cxy = await reproj_point(this.viewport_ctr, this.crs, to_crs);
             const exy = await reproj_extent(this.ext, this.crs, to_crs, this.res);
             const mxy = await reproj_extent(this.ext0, this.crs, to_crs, this.res);
+            // need to adjust the resolution because e.g. map units might change from metres to degrees, or the general scale might change
+            const res_ext = await reproj_extent([(this.ext[0] + this.ext[1]) / 2 - this.res/2, (this.ext[0] + this.ext[1]) / 2 + this.res/2, (this.ext[2] + this.ext[3]) / 2 - this.res/2, (this.ext[2] + this.ext[3]) / 2 + this.res/2], this.crs, to_crs, this.res);
+            const res = (res_ext[1] - res_ext[0] + res_ext[3] - res_ext[2]) / 2;
             if (cxy !== null && exy !== null && mxy !== null) {
                 Shiny.setInputValue('$ID$-reproj', {"ctr":cxy, "extent":exy, "crs":to_crs});
                 this.crs = to_crs;
                 this.xsc = (exy[1] - exy[0]) / this.image_wh;
                 this.ysc = (exy[3] - exy[2]) / this.image_wh;
-                // this.res = ... don't need to change the resolution?
+                this.res = res;
                 this.viewport_ctr = cxy;
                 this.ext = exy;
                 this.ext0 = mxy;

@@ -70,8 +70,10 @@ vl_map_ui <- function(id, view_wh = c("40vw", "40vh")) {
                  tags$div(id = NS(id, "plot_controls"), class = "vl-plot-controls",
                           tags$button(id = NS(id, "zoom_in"), class = "btn btn-default", icon("magnifying-glass-plus", id = NS(id, "zoom-in-icon")), title = "Zoom in"),
                           tags$button(id = NS(id, "zoom_out"), class = "btn btn-default", icon("magnifying-glass-minus", id = NS(id, "zoom-out-icon")), title = "Zoom out"),
-                          actionButton(NS(id, "pan_button"), class = "btn btn-default", label = icon("hand", id = NS(id, "pan-icon")), title = "Pan map", onclick = paste0("$('#", NS(id, "pan-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "select-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='pan';"))##,
-                          ## temporarily actionButton(NS(id, "select_button"), class = "btn btn-default", label = icon("object-group", id = NS(id, "select-icon"), class = "icon-disabled"), title = "Select region", onclick = paste0("$('#", NS(id, "select-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "pan-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='select';"))
+                          ## temporarily, since there is no "Select region" functionality there is no point in showing the pan button
+                          ## actionButton(NS(id, "pan_button"), class = "btn btn-default", label = icon("hand", id = NS(id, "pan-icon")), title = "Pan map", onclick = paste0("$('#", NS(id, "pan-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "select-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='pan';"))##,
+                          ## temporarily, until region selection functionality is implemented
+                          ## actionButton(NS(id, "select_button"), class = "btn btn-default", label = icon("object-group", id = NS(id, "select-icon"), class = "icon-disabled"), title = "Select region", onclick = paste0("$('#", NS(id, "select-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "pan-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='select';"))
                           ),
                  tags$div(id = id, class = "viewport",
                           tags$canvas(id = NS(id, "canvas"), class = "viewport-canvas"), ## used for the panning, rectangle-dragging, etc
@@ -290,13 +292,15 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         }
 
         handle_tile_data <- function(result) {
-            td2 <- isolate(tiles_data[[as.character(result$z)]]) ## tiles for layer z
-            if (result$id %in% td2$img$ids) {
-                i <- which(result$id == td2$img$ids)
-                td2$img$data[[i]] <- result$data
-                td2$img$data_hash <- rlang::hash(td2$img$data)
-                tiles_data[[as.character(result$z)]] <- td2
-            }
+            try({
+                td2 <- isolate(tiles_data[[as.character(result$z)]]) ## tiles for layer z
+                if (result$id %in% td2$img$ids) {
+                    i <- which(result$id == td2$img$ids)
+                    td2$img$data[[i]] <- result$data
+                    td2$img$data_hash <- rlang::hash(td2$img$data) ## TODO does it help to include the zlim hash here?
+                    tiles_data[[as.character(result$z)]] <- td2
+                }
+            })
         }
 
         ## trigger the drawing of a layer's tiles when its tiles_data changes and/or its layerdef changes (e.g. zlim)
@@ -483,8 +487,9 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     if (!mirai::unresolved(job)) {
                         result <- job$data
                         done <- c(done, ji)
-                        if (.debug > 2) message("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
-                        if (!mirai::is_mirai_error(result)) {
+                        result_was_ok <- !mirai::is_mirai_error(result) && !is.null(result) && tryCatch({ result$key; TRUE }, error = function(e) FALSE) ## sometimes we just get an error string back
+                        if (result_was_ok) {
+                            if (.debug > 2) message("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
                             if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("z", "i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
                         } else {

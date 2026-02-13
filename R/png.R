@@ -26,7 +26,8 @@ tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression
     if (debug > 0) message("rendering raster tile to png:", pltf)
     if (use_fastpng) {
         if (layerdef$type == "raster_data") {
-            zl <- if (is.null(layerdef$zlims[[1]])) stop("need z limits") else layerdef$zlims[[1]]
+            cmap <- layerdef$cmap[[1]]
+            zl <- if (is.null(layerdef$zlims[[1]]) && !is.function(cmap)) stop("need z limits") else layerdef$zlims[[1]] ## NULL zlims ok if function?
             if (debug > 0) message("  zlim is:", zl[1], " to ", zl[2], "\n")
             ## construct matrix
             if (!is.null(attr(td$img$data[[i]], "gis"))) {
@@ -37,7 +38,6 @@ tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression
                 tdim <- attr(td$img$data[[i]], "dimension")
                 m <- matrix(td$img$data[[i]][[1]], nrow = tdim[2], byrow = TRUE)
             }
-            cmap <- layerdef$cmap[[1]]
             if (is.function(cmap)) {
                 temp <- cmap(m, zlim = zl) ## returns a list with palette indices and palette
                 cmap <- temp[[2]]
