@@ -149,11 +149,12 @@ vl_demo <- function() {
         ## handle click events
         observeEvent(vl_obj$click(), {
             req(vl_obj$click())
-            idx <- which.min(abs(sx$X - vl_obj$click()[1]) + abs(sx$Y - vl_obj$click()[2]))
+            sx <- st_coordinates(sx_data())
+            idx <- which.min(abs(sx[, 1] - vl_obj$click()[1]) + abs(sx[, 2] - vl_obj$click()[2]))
             ## TODO fix this, it's just snapping to the nearest data point, which might be a long way from the click
             output$site_tbl <- DT::renderDataTable({
-                tbl_cols <- setdiff(names(sx), c("X", "Y", "geometry"))
-                temp <- as.data.frame(sx[idx, ])[, tbl_cols] %>% mutate(across(everything(), function(z) as.character(if (is.numeric(z)) round(z, 3) else z)))
+                tbl_cols <- setdiff(names(sx_data()), c("X", "Y", "geometry"))
+                temp <- as.data.frame(sx_data()[idx, ])[, tbl_cols] %>% mutate(across(everything(), function(z) as.character(if (is.numeric(z)) round(z, 3) else z)))
                 temp <- tibble(Variable = names(temp), Value = unlist(temp))
                 dt_opts <- list(sDom = '<"top">t<"bottom">r')##, ## filters and paging options, no i, p, or l
                 DT::datatable(temp, rownames = FALSE, options = dt_opts, selection = "none", filter = "none", class = "display")

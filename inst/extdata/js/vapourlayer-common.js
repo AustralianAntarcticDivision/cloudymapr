@@ -62,7 +62,7 @@ const vpext_mu = function(ctr, vpsz_px, xsc, ysc, zoom_level) {
 }
 
 const redraw_zoomed = function(cm, ext_unz, zoom_in, by) {
-    if (typeof("by") == "undefined") { by = 2; }
+    if (typeof by === "undefined") { by = 2; }
     // apply the css scale and recentre the viewport, before the server-side redraw (at wider extent for zoom out, or higher res for zoom in)
     // calculate the css offsets that we'll need to apply
     var fx = (cm.viewport_ctr[0] - cm.ext[0]) / (cm.ext[1] - cm.ext[0]); // fraction of x-extent

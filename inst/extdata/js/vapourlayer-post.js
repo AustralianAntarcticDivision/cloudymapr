@@ -211,49 +211,51 @@ const Pannable = (elViewport) => {
             }
         } else {
             if (cm.select_mode === 'select') {
-                // clear rectangle from canvas and send selection to server
+                // clear rectangle from canvas
                 var selrect = dragrect;
                 var vprect = elViewport.getBoundingClientRect();
                 ctx.clearRect(0, 0, vprect.width, vprect.height);
-                selrect.startY = vprect.height - selrect.startY; // zero at bottom, not top // TODO fix?
-                selrect.endX = selrect.startX + selrect.w;
-                selrect.endY = selrect.startY - selrect.h;
-                console.log("selrect: ");
-                console.log(selrect);
-                // that's the selected region in pixels relative to viewport, noting that the y-values are zero at the bottom, not top
-                var selrect2 = [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)];
-                // and convert y-values to positive downwards from top, not positive upwards from bottom
-                selrect2[2] = vprect.height - selrect2[2];
-                selrect2[3] = vprect.height - selrect2[3];
-                console.log("selrect2: " + selrect2.map(Math.round));
-                const selrect2_px = [
-                    selrect2[0] - parseInt($("#" + cm.id + "-plot1").css("left"), 10) - parseInt($("#" + cm.id + "-pannable").css("left"), 10),
-                    selrect2[1] - parseInt($("#" + cm.id + "-plot1").css("left"), 10) - parseInt($("#" + cm.id + "-pannable").css("left"), 10),
-                    selrect2[2] - parseInt($("#" + cm.id + "-plot1").css("top"), 10) - parseInt($("#" + cm.id + "-pannable").css("top"), 10),
-                    selrect2[3] - parseInt($("#" + cm.id + "-plot1").css("top"), 10) - parseInt($("#" + cm.id + "-pannable").css("top"), 10)
-                ]; // in pixels relative to canvas, noting that y-pixels here are measured down from the top of the canvas
-                console.log("selrect2_px: " + selrect2_px.map(Math.round));
-                const tl_mu = cm.px2m([selrect2_px[0], selrect2_px[2]]);
-                const br_mu = cm.px2m([selrect2_px[1], selrect2_px[3]]);
-                const selrect2_mu = [tl_mu[0], br_mu[0], br_mu[1], tl_mu[1]]; // xmin xmax ymin ymax
-                console.log("selrect2_mu: " + selrect2_mu.map(Math.round));
-                const sel_cxy = [(selrect2_mu[0] + selrect2_mu[1]) / 2, (selrect2_mu[2] + selrect2_mu[3]) / 2]; // zoom centre in mu
-                console.log("zoom ctr: " + sel_cxy.map(Math.round));
-                // now figure out what zoom we want. We want to zoom to the lowest power of 2 that encompasses the range of this mu rectangle, with the appropriate alignment to tile edges
-                // NOTING that we want the new viewport to show the zoomed extent as best as possible, meaning that the zoom level should not come from cm.ext but instead cm.vpext_mu()
-                const vpext_mu = cm.vpext_mu();
-                const zx = Math.pow(2, Math.floor(Math.log2(Math.abs(vpext_mu[1] - vpext_mu[0]) / Math.abs(selrect2_mu[1] - selrect2_mu[0]))));
-                const zy = Math.pow(2, Math.floor(Math.log2(Math.abs(vpext_mu[3] - vpext_mu[2]) / Math.abs(selrect2_mu[3] - selrect2_mu[2]))));
-                console.log("zoom: " + zx + " or " + zy);
-                const zz = Math.min(zx, zy); // choose the lowest
-                //Shiny.setInputValue(id + '-dragselect', [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)]); // rectangle in pixels relative to viewport
-                cm.zoom_in(zz, sel_cxy);
+                // don't zoom if the dragrect was too small
+                // TODO a better way of aborting the drag-selection
+                if (Math.abs(selrect.w) > 1 && Math.abs(selrect.h) > 1) {
+                    selrect.startY = vprect.height - selrect.startY; // zero at bottom, not top // TODO fix?
+                    selrect.endX = selrect.startX + selrect.w;
+                    selrect.endY = selrect.startY - selrect.h;
+                    // that's the selected region in pixels relative to viewport, noting that the y-values are zero at the bottom, not top
+                    var selrect2 = [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)];
+                    // and convert y-values to positive downwards from top, not positive upwards from bottom
+                    selrect2[2] = vprect.height - selrect2[2];
+                    selrect2[3] = vprect.height - selrect2[3];
+                    console.log("selrect2: " + selrect2.map(Math.round));
+                    const selrect2_px = [
+                        selrect2[0] - parseInt($("#" + cm.id + "-plot1").css("left"), 10) - parseInt($("#" + cm.id + "-pannable").css("left"), 10),
+                        selrect2[1] - parseInt($("#" + cm.id + "-plot1").css("left"), 10) - parseInt($("#" + cm.id + "-pannable").css("left"), 10),
+                        selrect2[2] - parseInt($("#" + cm.id + "-plot1").css("top"), 10) - parseInt($("#" + cm.id + "-pannable").css("top"), 10),
+                        selrect2[3] - parseInt($("#" + cm.id + "-plot1").css("top"), 10) - parseInt($("#" + cm.id + "-pannable").css("top"), 10)
+                    ]; // in pixels relative to canvas, noting that y-pixels here are measured down from the top of the canvas
+                    console.log("selrect2_px: " + selrect2_px.map(Math.round));
+                    const tl_mu = cm.px2m([selrect2_px[0], selrect2_px[2]]);
+                    const br_mu = cm.px2m([selrect2_px[1], selrect2_px[3]]);
+                    const selrect2_mu = [tl_mu[0], br_mu[0], br_mu[1], tl_mu[1]]; // xmin xmax ymin ymax
+                    console.log("selrect2_mu: " + selrect2_mu.map(Math.round));
+                    const sel_cxy = [(selrect2_mu[0] + selrect2_mu[1]) / 2, (selrect2_mu[2] + selrect2_mu[3]) / 2]; // zoom centre in mu
+                    console.log("zoom ctr: " + sel_cxy.map(Math.round));
+                    // now figure out what zoom we want. We want to zoom to the lowest power of 2 that encompasses the range of this mu rectangle, with the appropriate alignment to tile edges
+                    // NOTING that we want the new viewport to show the zoomed extent as best as possible, meaning that the zoom level should not come from cm.ext but instead cm.vpext_mu()
+                    const vpext_mu = cm.vpext_mu();
+                    const zx = Math.pow(2, Math.floor(Math.log2(Math.abs(vpext_mu[1] - vpext_mu[0]) / Math.abs(selrect2_mu[1] - selrect2_mu[0]))));
+                    const zy = Math.pow(2, Math.floor(Math.log2(Math.abs(vpext_mu[3] - vpext_mu[2]) / Math.abs(selrect2_mu[3] - selrect2_mu[2]))));
+                    console.log("zoom: " + zx + " or " + zy);
+                    const zz = Math.min(zx, zy); // choose the lowest
+                    //Shiny.setInputValue(id + '-dragselect', [Math.min(selrect.startX, selrect.endX), Math.max(selrect.startX, selrect.endX), Math.min(selrect.startY, selrect.endY), Math.max(selrect.startY, selrect.endY)]); // rectangle in pixels relative to viewport
+                    cm.zoom_in(zz, sel_cxy);
+                }
                 dragrect = {};
             }
         }
     };
 
     elViewport.addEventListener('pointerdown', panStart);
-    addEventListener('pointermove', panMove);
-    addEventListener('pointerup', panEnd);
+    addEventListener('pointermove', panMove); // NB not attached to elViewport, so that movement beyond the viewport is captured TODO check
+    elViewport.addEventListener('pointerup', panEnd);
 };

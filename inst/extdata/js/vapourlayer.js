@@ -11,12 +11,12 @@ var cm_$ID$={
     vpsz() { return [$('#$ID$').innerWidth() / window.innerWidth, $('#$ID$').innerHeight() / window.innerHeight] }, // viewport size [w,h] as fraction of window size
     vpsz_px() { return [$('#$ID$').innerWidth(), $('#$ID$').innerHeight()] }, // viewport size in px
 //     vpext_mu(l, t) {
-// //PP         if (typeof(l) == "undefined") { l = parseInt($('#$ID$-pannable').css("left"), 10); } // positive left means the (left side of the) viewport is panned leftwards outside the full map extent
-// //PP         if (typeof(t) == "undefined") { t = parseInt($('#$ID$-pannable').css("top"), 10); } // positive top means the (top of the) viewport is panned upwards above top of the full map extent
+// //PP         if (typeof l === "undefined") { l = parseInt($('#$ID$-pannable').css("left"), 10); } // positive left means the (left side of the) viewport is panned leftwards outside the full map extent
+// //PP         if (typeof t === "undefined") { t = parseInt($('#$ID$-pannable').css("top"), 10); } // positive top means the (top of the) viewport is panned upwards above top of the full map extent
 // 
 //         //(-parseInt($("#$ID$-pannable").css("left"), 10) - parseInt($('#$ID$-pannable canvas').first().css("left"), 10)) / cm_$ID$.image_wh // left size of vp wrt to ext, as fraction
-//         if (typeof(l) == "undefined") l = -(-parseInt($("#$ID$-pannable").css("left"), 10) - parseInt($('#$ID$-pannable canvas').first().css("left"), 10));
-//         if (typeof(t) == "undefined") t = -(-parseInt($("#$ID$-pannable").css("top"), 10) - parseInt($('#$ID$-pannable canvas').first().css("top"), 10));
+//         if (typeof l === "undefined") l = -(-parseInt($("#$ID$-pannable").css("left"), 10) - parseInt($('#$ID$-pannable canvas').first().css("left"), 10));
+//         if (typeof t === "undefined") t = -(-parseInt($("#$ID$-pannable").css("top"), 10) - parseInt($('#$ID$-pannable canvas').first().css("top"), 10));
 // /*
 //         var extw = this.ext[1] - this.ext[0];
 //         var exth = this.ext[3] - this.ext[2];
@@ -67,8 +67,8 @@ var cm_$ID$={
     },
     zoom_level: 1,
     zoom_in(by, ctr) {
-        if (typeof(by) == "undefined") { by = 2; }
-        if (typeof(ctr) == "undefined") {
+        if (typeof by === "undefined") { by = 2; }
+        if (typeof ctr === "undefined") {
             ctr = this.viewport_ctr; // take the current viewport center
         } else {
             this.viewport_ctr = ctr;
@@ -87,8 +87,8 @@ var cm_$ID$={
         this.res = this.res / by;
         // change the xsc, ysc etc? TODO (if yes, don't modify those things by zoom level in other funcs)
         // send to server
-        Shiny.setInputValue("$ID$-do_zoom", this.ext.concat([this.res, this.zoom_level]).concat(ctr));
-        redraw_zoomed(this, ext_unz, true); // redraw at the zoomed level using current data, while we wait for new data to arrive
+       Shiny.setInputValue("$ID$-do_zoom", this.ext.concat([this.res, this.zoom_level]).concat(ctr));
+        redraw_zoomed(this, ext_unz, true, by); // redraw at the zoomed level using current data, while we wait for new data to arrive
     },
     zoom_out() {
         if (this.zoom_level > 1) {
@@ -128,7 +128,7 @@ var cm_$ID$={
 
     // set the viewport centre to `xy` (specified in map units) and pan the image canvases appropriately
     set_vpctr_mu(xy) {
-        if (typeof(xy) == "undefined") { xy = this.viewport_ctr; } // default to current value
+        if (typeof xy === "undefined") { xy = this.viewport_ctr; } // default to current value
         var fx = (xy[0] - this.ext[0]) / (this.ext[1] - this.ext[0]); // fraction of x-extent
         var cssx = this.image_wh * fx - $('#$ID$').innerWidth() / 2 + parseInt($("#$ID$-pannable").css("left"), 10); // take off half the viewport width to get the left side, and adjust for the left-offset of the parent
         var fy = (this.ext[3] - xy[1]) / (this.ext[3] - this.ext[2]); // fraction of y-extent (downwards from top)
