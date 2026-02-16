@@ -4,23 +4,7 @@ var cm_$ID$={
     xsc: 1, xoff: 0, ysc: 1, yoff: 0, imxoff: 0, imyoff: 0, //xoff, yoff ignored temporarily TODO
     crs: "",
     active_layers: [],
-//    px2m(xy) { return px2m(xy, this.xsc / this.zoom_level, this.xoff, this.ysc / this.zoom_level, this.yoff, this.imxoff, this.imyoff, this.image_wh); },
-//    m2px(xy) { return m2px(xy, this.xsc / this.zoom_level, this.xoff, this.ysc / this.zoom_level, this.yoff, this.imxoff, this.imyoff, this.image_wh); },
-    px2m(xy) { return px2m(xy, this.xsc / this.zoom_level, this.ext[1] - this.ext[0], this.ysc / this.zoom_level, this.ext[3] - this.ext[2], this.imxoff, this.imyoff, this.image_wh); }, // probably wrong, fix or remove TODO
-    /*m2px(xy, ignore_zoom) {
-        if (typeof(ignore_zoom) == "undefined") { ignore_zoom = false; }
-        var xsc = this.xsc;
-        var ysc = this.ysc;
-        var xoff = (this.ext0[1] + this.ext0[0]) / 2;
-        var yoff = (this.ext0[3] + this.ext0[2]) / 2;
-        if (!ignore_zoom) {
-            xsc = xsc / this.zoom_level;
-            ysc = ysc / this.zoom_level;
-            xoff = (this.ext[1] + this.ext[0]) / 2;
-            yoff = (this.ext[3] + this.ext[2]) / 2;
-        }
-        return m2px(xy, xsc, xoff, ysc, yoff, this.imxoff, this.imyoff, this.image_wh);
-    },*/
+    px2m(xy) { return [this.ext[0] + xy[0] / this.image_wh * (this.ext[1] - this.ext[0]), this.ext[3] - xy[1] / this.image_wh * (this.ext[3] - this.ext[2])] },
     m2px(xy) {
         return m2px(xy, this.xsc / this.zoom_level, this.ext[0], this.ysc / this.zoom_level, this.ext[2], 0, 0, this.image_wh);
     },
@@ -82,23 +66,29 @@ var cm_$ID$={
         this.viewport_ctr = [(newext[0] + newext[1]) / 2, (newext[2] + newext[3]) / 2];
     },
     zoom_level: 1,
-    zoom_in() {
-        this.zoom_level = this.zoom_level * 2;
+    zoom_in(by, ctr) {
+        if (typeof(by) == "undefined") { by = 2; }
+        if (typeof(ctr) == "undefined") {
+            ctr = this.viewport_ctr; // take the current viewport center
+        } else {
+            this.viewport_ctr = ctr;
+        }
+        this.zoom_level = this.zoom_level * by;
         // adjust ext (data extent)
-        var w = (this.ext[1] - this.ext[0]) / 4; var h = (this.ext[3] - this.ext[2]) / 4; // new half-width and half-height
-        var ctrx = Math.max(Math.round((this.viewport_ctr[0] - this.ext0[0]) / w), 1) * w + this.ext0[0];
+        var w = (this.ext[1] - this.ext[0]) / 2  / by; var h = (this.ext[3] - this.ext[2]) / 2 / by; // new half-width and half-height
+        var ctrx = Math.max(Math.round((ctr[0] - this.ext0[0]) / w), 1) * w + this.ext0[0];
         ctrx = Math.min(ctrx, this.ext0[1] - w);
-        var ctry = Math.max(Math.round((this.viewport_ctr[1] - this.ext0[2]) / h), 1) * h + this.ext0[2];
+        var ctry = Math.max(Math.round((ctr[1] - this.ext0[2]) / h), 1) * h + this.ext0[2];
         ctry = Math.min(ctry, this.ext0[3] - h);
         // ctrx and ctry give the centre for the zoom, which won't be the centre of the existing data extent if we have zoomed somewhere not near the original centre
-        console.log("data centre for zoom: " + [ctrx, ctry] + ", half-width: " + w + ", viewport centre: ", this.viewport_ctr);
-        var ext0 = this.ext.map((x) => x); // copy of unzoomed ext
+        console.log("data centre for zoom: " + [ctrx, ctry] + ", half-width: " + w + ", view centre: ", ctr);
+        var ext_unz = this.ext.map((x) => x); // copy of unzoomed ext
         this.ext = [ctrx - w, ctrx + w, ctry - h, ctry + h];
-        this.res = this.res / 2;
+        this.res = this.res / by;
         // change the xsc, ysc etc? TODO (if yes, don't modify those things by zoom level in other funcs)
         // send to server
-        Shiny.setInputValue("$ID$-do_zoom", this.ext.concat([this.res, this.zoom_level]).concat(this.viewport_ctr));
-        redraw_zoomed(this, ext0, true);
+        Shiny.setInputValue("$ID$-do_zoom", this.ext.concat([this.res, this.zoom_level]).concat(ctr));
+        redraw_zoomed(this, ext_unz, true); // redraw at the zoomed level using current data, while we wait for new data to arrive
     },
     zoom_out() {
         if (this.zoom_level > 1) {
@@ -158,8 +148,8 @@ var cm_$ID$={
             const mxy = await reproj_extent(this.ext0, this.crs, to_crs, this.res);
             // need to adjust the resolution because e.g. map units might change from metres to degrees, or the general scale might change
             const res_ext = await reproj_extent([(this.ext[0] + this.ext[1]) / 2 - this.res/2, (this.ext[0] + this.ext[1]) / 2 + this.res/2, (this.ext[2] + this.ext[3]) / 2 - this.res/2, (this.ext[2] + this.ext[3]) / 2 + this.res/2], this.crs, to_crs, this.res);
-            const res = (res_ext[1] - res_ext[0] + res_ext[3] - res_ext[2]) / 2;
-            if (cxy !== null && exy !== null && mxy !== null) {
+            if (res_ext !== null && cxy !== null && exy !== null && mxy !== null) {
+                const res = (res_ext[1] - res_ext[0] + res_ext[3] - res_ext[2]) / 2;
                 Shiny.setInputValue('$ID$-reproj', {"ctr":cxy, "extent":exy, "crs":to_crs});
                 this.crs = to_crs;
                 this.xsc = (exy[1] - exy[0]) / this.image_wh;

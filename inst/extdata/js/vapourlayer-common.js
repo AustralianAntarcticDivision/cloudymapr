@@ -61,7 +61,8 @@ const vpext_mu = function(ctr, vpsz_px, xsc, ysc, zoom_level) {
     return [ctr[0] - w / 2, ctr[0] + w / 2, ctr[1] - h / 2, ctr[1] + h / 2];
 }
 
-const redraw_zoomed = function(cm, ext0, zoom_in) {
+const redraw_zoomed = function(cm, ext_unz, zoom_in, by) {
+    if (typeof("by") == "undefined") { by = 2; }
     // apply the css scale and recentre the viewport, before the server-side redraw (at wider extent for zoom out, or higher res for zoom in)
     // calculate the css offsets that we'll need to apply
     var fx = (cm.viewport_ctr[0] - cm.ext[0]) / (cm.ext[1] - cm.ext[0]); // fraction of x-extent
@@ -74,19 +75,19 @@ const redraw_zoomed = function(cm, ext0, zoom_in) {
     var octx = ocv.getContext('2d');
     // rectangles in source canvas and destination canvas
     if (zoom_in) {
-        var srcx = (cm.ext[0] - ext0[0]) / (ext0[1] - ext0[0]) * cm.image_wh; // top-left x coord of source
-        var srcy = (ext0[3] - cm.ext[3]) / (ext0[3] - ext0[2]) * cm.image_wh;
-        var srcw = cm.image_wh / 2; // or (this.ext[1] - this.ext[0]) / (ext0[1] - ext0[0]) * cm.image_wh;
-        var srch = cm.image_wh / 2;
+        var srcx = (cm.ext[0] - ext_unz[0]) / (ext_unz[1] - ext_unz[0]) * cm.image_wh; // top-left x coord of source
+        var srcy = (ext_unz[3] - cm.ext[3]) / (ext_unz[3] - ext_unz[2]) * cm.image_wh;
+        var srcw = cm.image_wh / by; // or (this.ext[1] - this.ext[0]) / (ext_unz[1] - ext_unz[0]) * cm.image_wh;
+        var srch = cm.image_wh / by;
         var destx = 0;
         var desty = 0;
         var destw = cm.image_wh;
         var desth = cm.image_wh;
     } else {
-        var destx = (ext0[0] - cm.ext[0]) / (cm.ext[1] - cm.ext[0]) * cm.image_wh; // top-left x coord in destination canvas
-        var desty = (cm.ext[3] - ext0[3]) / (cm.ext[3] - cm.ext[2]) * cm.image_wh;
-        var destw = cm.image_wh / 2;
-        var desth = cm.image_wh / 2;
+        var destx = (ext_unz[0] - cm.ext[0]) / (cm.ext[1] - cm.ext[0]) * cm.image_wh; // top-left x coord in destination canvas
+        var desty = (cm.ext[3] - ext_unz[3]) / (cm.ext[3] - cm.ext[2]) * cm.image_wh;
+        var destw = cm.image_wh / by;
+        var desth = cm.image_wh / by;
         //console.log("dest x,y,w,h: " + destx + ", " + desty + ", " + destw + ", " + desth);
         var srcx = 0;
         var srcy = 0;

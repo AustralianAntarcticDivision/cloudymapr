@@ -70,10 +70,8 @@ vl_map_ui <- function(id, view_wh = c("40vw", "40vh")) {
                  tags$div(id = NS(id, "plot_controls"), class = "vl-plot-controls",
                           tags$button(id = NS(id, "zoom_in"), class = "btn btn-default", icon("magnifying-glass-plus", id = NS(id, "zoom-in-icon")), title = "Zoom in"),
                           tags$button(id = NS(id, "zoom_out"), class = "btn btn-default", icon("magnifying-glass-minus", id = NS(id, "zoom-out-icon")), title = "Zoom out"),
-                          ## temporarily, since there is no "Select region" functionality there is no point in showing the pan button
-                          ## actionButton(NS(id, "pan_button"), class = "btn btn-default", label = icon("hand", id = NS(id, "pan-icon")), title = "Pan map", onclick = paste0("$('#", NS(id, "pan-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "select-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='pan';"))##,
-                          ## temporarily, until region selection functionality is implemented
-                          ## actionButton(NS(id, "select_button"), class = "btn btn-default", label = icon("object-group", id = NS(id, "select-icon"), class = "icon-disabled"), title = "Select region", onclick = paste0("$('#", NS(id, "select-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "pan-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='select';"))
+                          actionButton(NS(id, "pan_button"), class = "btn btn-default", label = icon("hand", id = NS(id, "pan-icon")), title = "Pan map", onclick = paste0("$('#", NS(id, "pan-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "select-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='pan';")),
+                          actionButton(NS(id, "select_button"), class = "btn btn-default", label = icon("object-group", id = NS(id, "select-icon"), class = "icon-disabled"), title = "Select region", onclick = paste0("$('#", NS(id, "select-icon"), "').removeClass('icon-disabled'); $('#", NS(id, "pan-icon"), "').addClass('icon-disabled'); cm_", id, ".select_mode='select';"))
                           ),
                  tags$div(id = id, class = "viewport",
                           tags$canvas(id = NS(id, "canvas"), class = "viewport-canvas"), ## used for the panning, rectangle-dragging, etc
@@ -169,17 +167,18 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             maxextstr <- paste0("[", initial_view$max_extent[1], ",", initial_view$max_extent[2], ",", initial_view$max_extent[3], ",", initial_view$max_extent[4], "];")
             ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];") ## TODO allow centre to be specifed as something else?
             alstr <- paste0("[", paste(sapply(layerdef(), function(w) w$z), collapse = ","), "];") ## active layers, 1-indexed
-            evaljs(paste0("cm_", id, ".xsc=", diff(initial_view$extent[1:2]) / image_wh, ";",
-                          "cm_", id, ".ysc=", diff(initial_view$extent[3:4]) / image_wh, ";",
-                          "cm_", id, ".xoff=0;cm_", id, ".yoff=0;",
-                          "cm_", id, ".imxoff=", image_wh / 2, ";cm_", id, ".imyoff=", image_wh / 2, ";",
-                          "cm_", id, ".crs='", target_crs(), "';",
-                          "cm_", id, ".image_wh=", image_wh, ";",
-                          "cm_", id, ".res=", initial_view$res, ";",
-                          "cm_", id, ".viewport_ctr=", ctrstr,
-                          "cm_", id, ".active_layers=", alstr,
-                          "cm_", id, ".ext=", extstr, "cm_", id, ".ext0=", maxextstr
-                          ))
+            evaljs("cm_", id, ".xsc=", diff(initial_view$extent[1:2]) / image_wh, ";",
+                   "cm_", id, ".ysc=", diff(initial_view$extent[3:4]) / image_wh, ";",
+                   "cm_", id, ".xoff=0;cm_", id, ".yoff=0;",
+                   "cm_", id, ".imxoff=", image_wh / 2, ";cm_", id, ".imyoff=", image_wh / 2, ";",
+                   "cm_", id, ".crs='", target_crs(), "';",
+                   "cm_", id, ".image_wh=", image_wh, ";",
+                   "cm_", id, ".res=", initial_view$res, ";",
+                   "cm_", id, ".viewport_ctr=", ctrstr,
+                   "cm_", id, ".active_layers=", alstr,
+                   "cm_", id, ".select_mode='pan';", ## TODO check that it matches input on startup
+                   "cm_", id, ".ext=", extstr, "cm_", id, ".ext0=", maxextstr
+                   )
             init_done <<- TRUE
         })
 
@@ -188,6 +187,18 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         ## set the canvas sizes and store array of contexts
         evaljs(paste0("$('#", id, "-pannable').width('", image_wh, "px').height('", image_wh, "px'); ",
                       id, "_ctxlist = []; for (let i = 1; i <= 9; i++) { var this_ctx = document.getElementById('", id, "-plot' + i).getContext('2d', { willReadFrequently: true }); this_ctx.canvas.height = ", image_wh, "; this_ctx.canvas.width = ", image_wh, "; ", id, "_ctxlist[i] = this_ctx; }"))
+
+        observeEvent(input$pan_button, {
+            js_add_class(paste0(id, "-select-icon"), "icon-disabled")
+            js_remove_class(paste0(id, "-pan-icon"), "icon-disabled")
+            evaljs("cm_", id, ".select_mode = 'pan';")
+        })
+
+        observeEvent(input$select_button, {
+            js_remove_class(paste0(id, "-select-icon"), "icon-disabled")
+            js_add_class(paste0(id, "-pan-icon"), "icon-disabled")
+            evaljs("cm_", id, ".select_mode = 'select';")
+        })
 
         observeEvent(input$do_zoom, {
             cat("do_zoom: ", input$do_zoom, "\n")
