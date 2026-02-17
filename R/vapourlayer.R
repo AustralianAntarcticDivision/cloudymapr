@@ -427,7 +427,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                     td$img <- list(ids = ids, data = rep(list(NULL), nrow(imgdef$xy_grid)), xy_hash = xy_hash, data_hash = "")
                     tiles_data[[as.character(z)]] <- td
                     ld <- layerdef()[[z]]
-                    for (i in seq_len(nrow(imgdef$xy_grid))) outer_fetch_tile(imgdef, z, ids, i, use_mirai = TRUE)
+                    for (i in seq_len(nrow(imgdef$xy_grid))) outer_fetch_tile(imgdef, z, ids, i, use_mirai = .parallel_gdal_req)
                 }
             })
         }
