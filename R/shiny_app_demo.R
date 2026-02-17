@@ -8,6 +8,9 @@
 #' @export
 vl_demo <- function() {
 
+    ## some options
+    .show_crs_selector <- FALSE
+
     qcd <- system.file("extdata/demo/quantarctica_cache", package = "cloudymapr", mustWork = TRUE)
     quiet_reader <- function(...) sf::st_read(..., quiet = TRUE) ## shoosh
     cst <- st_geometry(quiet_reader(file.path(qcd, "ADD_Coastline_medium_res_polygon.shp")))
@@ -55,7 +58,7 @@ vl_demo <- function() {
 
     ## env/background layers
     raster_cat <- tribble(~type, ~name, ~dsn, ~cmap, ~zlims, ~extra_args,
-                          "raster_image_rgb", "EO Basemap", "/vsicurl/https://data.raadsync.cloud.edu.au/raad/public/idea.public/basemap/vlrast_eo.tif", NULL, NULL, NULL,
+                          "raster_image_rgb", "EO Basemap", if (file.exists("/data/vlrast_eo.tif")) "/data/vlrast_eo.tif" else "/vsicurl/https://data.raadsync.cloud.edu.au/raad/public/idea.public/basemap/vlrast_eo.tif", NULL, NULL, NULL,
                           "raster_image_rgb", "ESRI Basemap", "WMTS:http://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/WMTS/1.0.0/WMTSCapabilities.xml", NULL, NULL, NULL,
                           "raster_image_rgb", "BAS Basemap", "WMTS:https://tiles.arcgis.com/tiles/tPxy1hrFDhJfZ0Mf/arcgis/rest/services/Antarctica_and_the_Southern_Ocean/MapServer/WMTS/1.0.0/WMTSCapabilities.xml", NULL, NULL, NULL,
                           "raster_image_grey", "REMA Hillshade", "/vsicurl/https://data.raadsync.cloud.edu.au/raad/public/idea.public/basemap/rema_mosaic_100m_v2.0_filled_cop30_browse.tif", NULL, NULL, list(trns = 0), ## range 1-255, nodata = 0 gray.colors(101, start = 0, end = 1)
@@ -67,7 +70,7 @@ vl_demo <- function() {
 
     ## metadata about the raster layers to show in the app
     raster_meta <- tribble(~name, ~citation, ~details,
-                           "EO Basemap", tags$span("NASA Earth Observatory map by Joshua Stevens using data from NASA's MODIS Land Cover, the Shuttle Radar Topography Mission (SRTM), the General Bathymetric Chart of the Oceans (GEBCO), and Natural Earth boundaries.", tags$a(href = "https://visibleearth.nasa.gov/images/147190/explorer-base-map", "https://visibleearth.nasa.gov/images/147190/explorer-base-map")), "An RGB COG (geotiff) in long-lat projection, served by a standard web server and reprojected on the fly",
+                           "EO Basemap", tags$span("NASA Earth Observatory map by Joshua Stevens using data from NASA's MODIS Land Cover, the Shuttle Radar Topography Mission (SRTM), the General Bathymetric Chart of the Oceans (GEBCO), and Natural Earth boundaries.", tags$a(href = "https://visibleearth.nasa.gov/images/147190/explorer-base-map", "https://visibleearth.nasa.gov/images/147190/explorer-base-map")), paste0("An RGB COG (geotiff) in long-lat projection, served ", if (file.exists("/data/vlrast_eo.tif")) "from a local file" else "by a standard web server", " and reprojected on the fly"),
                            "ESRI Basemap", tags$span("ESRI World Imagery basemap.", tags$a(href = "https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9", "https://www.arcgis.com/home/item.html?id=10df2279f9684e4a9f6a7f08febac2a9")), "ESRI's World Imagery basemap, which is RGB imagery served through a web map tile server",
                            "BAS Basemap", tags$span("Basemap of Antarctic and Southern Ocean combining hillshade and bathymetry by the British Antarctic Survey.", tags$a(href = "https://www.arcgis.com/home/item.html?id=435e23642bf94b83b07d1d3fc0c5c9d5", "https://www.arcgis.com/home/item.html?id=435e23642bf94b83b07d1d3fc0c5c9d5")), "RGB image tiles in polar stereographic projection, served by a web map server",
                            "REMA Hillshade", tags$span("Reference Elevation Model of Antarctica v2.", tags$a(href = "https://doi.org/10.7910/DVN/EBW8UC", "https://doi.org/10.7910/DVN/EBW8UC")), "Greyscale COG (geotiff) in polar stereographic projection, served by a standard web server. Rendered to greyscale image with transparency",
@@ -77,6 +80,7 @@ vl_demo <- function() {
                            "GHRSST", tags$span("Sea surface temperature (1-Jan-2023) from GHRSST.", tags$a(href = "https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1", "https://podaac.jpl.nasa.gov/dataset/MUR-JPL-L4-GLOB-v4.1")), "A COG (geotiff) of data values in long-lat projection, served by a standard web server and reprojected and rendered on the fly using a custom colour palette. NaN values over land are plotted as transparent",
                            "Predator bioregions", tags$span("Southern Ocean predator bioregions from Reisinger et al. (2022)", tags$a(href = "https://doi.org/10.1016/j.biocon.2022.109630", "https://doi.org/10.1016/j.biocon.2022.109630")), "A COG (geotiff) of discrete values (bioregion numbers) in long-lat projection, served from AWS S3 object storage",
                            "Sea ice algae productivity", tags$span("Annual mean sea ice algae productivity from Pinkerton & Hayward (2021)", tags$a(href = "https://doi.org/10.1016/j.jmarsys.2021.103576", "https://doi.org/10.1016/j.jmarsys.2021.103576")), "A COG (geotiff) of data values in polar stereographic projection, served from AWS S3 object storage and rendered on the fly using a custom colour palette") ## NB the direct S3 link to this is "/vsicurl/https://s3.us-west-2.amazonaws.com/us-west-2.opendata.source.coop/scar/distant/pinkerton_hayward-2021/Pi2021-annual_cog.tif"
+
     ## some point data
     sx <- readRDS(system.file("extdata/demo/demo_data.rds", package = "cloudymapr"))
     ## duplicate lat and lon, just so they appear in the table when shown
@@ -92,7 +96,7 @@ vl_demo <- function() {
                         checkboxInput("ccamlr_areas", label = "CCAMLR Areas"),
                         tags$hr(),
                         uiOutput("bg_dialog"),
-                        ##selectInput("crs", label = "Projection", choices = list("Polar stereographic" = "EPSG:3031", "Equal-area" = "EPSG:3409", Mercator = "EPSG:3857"))
+                        if (.show_crs_selector) selectInput("crs", label = "Projection", choices = list("Polar stereographic" = "EPSG:3031", "Equal-area" = "EPSG:3409", Mercator = "EPSG:3857"))
                         ),
                  column(10, style = "overflow-y:hidden; height:65vh;", vl_map_ui("mymap", view_wh = c("75vw", "60vh")))),
         fluidRow(column(4, offset = 2, uiOutput("data_value")),
@@ -101,15 +105,23 @@ vl_demo <- function() {
     )
 
     server <- function(input, output) {
+        coast_plotter <- function(xlim, ylim, zoom, ...) {
+            plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
+            plot(cst_data(), border = "black", col = NA, add = TRUE, xlim = xlim, ylim = ylim, lwd = 1)
+            sx <- st_coordinates(sx_data())
+            points(sx[, 1], sx[, 2], pch = 21, bg = "green")
+        }
+        ccamlr_plotter <- function(xlim, ylim, zoom, ...) {
+            plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
+            plot(ccamlr_areas_data(), border = "blue", col = NA, add = TRUE, xlim = xlim, ylim = ylim)
+        }
         layerdef <- reactive({
+            blah <- layerdef_trigger()
             bg <- if (is.null(input$bg) || !input$bg %in% raster_cat$name) raster_cat[raster_cat$name == "EO Basemap", ] else raster_cat[raster_cat$name == input$bg, ]
             list(bg %>% mutate(z = 1L), ## raster layer using inbuilt renderer
                  list(fun = function(xlim, ylim, zoom, ...) { ## custom layer using own plot function
                      if (isTRUE(input$cst)) {
-                         plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
-                         plot(cst_data(), border = "black", col = NA, add = TRUE, xlim = xlim, ylim = ylim, lwd = 1)
-                         sx <- st_coordinates(sx_data())
-                         points(sx[, 1], sx[, 2], pch = 21, bg = "green")
+                         coast_plotter(xlim, ylim, zoom, ...)
                          TRUE
                      } else {
                          FALSE
@@ -117,8 +129,7 @@ vl_demo <- function() {
                  }, z = 2),
                  list(fun = function(xlim, ylim, zoom, ...) { ## custom layer using own plot function
                      if (isTRUE(input$ccamlr_areas)) {
-                         plot(0, 0, type = "n", axes = FALSE, xlim = xlim, ylim = ylim)
-                         plot(ccamlr_areas, border = "blue", col = NA, add = TRUE, xlim = xlim, ylim = ylim)
+                         ccamlr_plotter(xlim, ylim, zoom, ...)
                          TRUE
                      } else {
                          FALSE
@@ -134,12 +145,26 @@ vl_demo <- function() {
             if (length(idx) == 1) tags$p("Background imagery:", raster_meta$citation[idx][[1]], tags$br(), tags$br(), raster_meta$details[idx]) else NULL
         })
 
-        vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj,
-                                initial_view = list(tiles_per_side = 2L, res = 32e3, extent = c(-1, 1, -1, 1) * 2048e4))
+        iv <- list(tiles_per_side = 2L, res = 32e3,
+                   ##extent = c(0, 1, -0.5, 0) * 1024e4 )) ## non-square including Ant, for testing
+                   extent = c(-1, 1, -1, 1) * 2048e4)
+        vl_obj <- vl_map_server("mymap", layerdef = layerdef, target_crs = target_crs, cache = cache_obj, initial_view = iv)
+
+        if (.show_crs_selector){
+            observe({
+                req(input$crs)
+                cat("setting crs:", input$crs, "\n")
+                vl_obj$set_crs(input$crs)
+            })
+        }
 
         cst_data <- reactive({
             req(vl_obj$crs())
             st_transform(cst, crs = vl_obj$crs())
+        })
+        ccamlr_areas_data <- reactive({
+            req(vl_obj$crs())
+            st_transform(ccamlr_areas, crs = vl_obj$crs())
         })
         sx_data <- reactive({
             req(vl_obj$crs())
