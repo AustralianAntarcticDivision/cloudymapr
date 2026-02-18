@@ -1,6 +1,5 @@
 ## TODO allow centre to be specifed as something else?
 ## wrap in long-lat mode? otherwise deal with the large non-visible part of the canvas?
-## TODO need to remove IDs of tile fetch jobs if they become superseded, e.g. user zooms twice in quick succession
 
 image_def_from_view <- function(initial_view, zoom = 1) {
     ## xy centres of tiles in normalized [-1 1 -1 1] coords
@@ -306,7 +305,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 if (result$id %in% td2$img$ids) {
                     i <- which(result$id == td2$img$ids)
                     td2$img$data[[i]] <- result$data
-                    td2$img$data_hash <- rlang::hash(td2$img$data) ## TODO does it help to include the zlim hash here?
+                    td2$img$data_hash <- rlang::hash(td2$img$data)
                     tiles_data[[as.character(result$z)]] <- td2
                 }
             })
@@ -329,7 +328,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             ## td is that tiles_data entry
             ## i is the index within the layer (> 1 if we have multiple tiles per side)
             ## send tile to canvas
-            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]], cache = cache, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory, debug = .debug, tmpd = tmpd)
+            plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]], res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory, debug = .debug, tmpd = tmpd)
             if (!is.null(plot_contents)) {
                 tile_ext_mu <- attr(td$img$data[[i]], "extent")
                 if (.debug > 0) cat("sending tile to js ")

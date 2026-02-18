@@ -1,26 +1,6 @@
-## render data to png, but with caching
-tile_to_png <- function(..., cache, res, use_fastpng, png_compression_level, use_png_filter, png_in_memory, debug = 0, tmpd) {
-    keydata <- list(...)
-    if (!nzchar(names(keydata)[1])) names(keydata)[1] <- "td"
-    keydata$td <- if (keydata$i > length(keydata$td$img$data)) NULL else keydata$td$img$data[[keydata$i]] ## don't use other bits of td for cache key calculation
-    keydata$i <- NULL ## so that if we ask for a tile in slot N that was previously in slot M, the cached copy can be used
-    ## for now, no caching of pngs because changes in zlim are not always being correctly handled
-    ## key <- rlang::hash(keydata)
-    ## if (!is.null(cache) && cache$exists(key)) {
-    ##     if (file.exists(cache$get(key))) {
-    ##         if (debug > 0) cat("got cached png with key: ", key, "\n", sep = "")
-    ##         return(cache$get(key))
-    ##     } else {
-    ##         cache$remove(key)
-    ##     }
-    ## }
-    ## if (debug > 0) cat("no cached png available\n")
-    pltf <- tile_to_png_inner(..., res = res, use_fastpng = use_fastpng, png_compression_level = png_compression_level, use_png_filter = use_png_filter, png_in_memory = png_in_memory, debug = debug, tmpd = tmpd)
-    ## if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
-    pltf
-}
-
-tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression_level, use_png_filter, png_in_memory, debug = 0, tmpd) {
+## render data to png
+## at one point in the past we had a cache layer around these, but cache invalidation becomes difficult with varying zlim and colourmaps
+tile_to_png <- function(td, i, layerdef, res, use_fastpng, png_compression_level, use_png_filter, png_in_memory, debug = 0, tmpd) {
     if (i > length(td$img$data) || is.null(td$img$data[[i]][[1]])) return(NULL)
     pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
     if (debug > 0) cat("rendering raster tile to png:", pltf, "\n")
