@@ -29,7 +29,7 @@ vl_map_server(
 
 \item{initial_view}{list: a named list with components:
 \itemize{
-\item tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even? TODO note that >2 currently doesn't work properly when zooming
+\item tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even, and the x- and y-extents must be even multiples of the number of tiles per side
 \item extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
 \item res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
 \item max_extent numeric: as for \code{extent}, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used

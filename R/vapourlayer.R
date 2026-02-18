@@ -1,3 +1,7 @@
+## TODO allow centre to be specifed as something else?
+## wrap in long-lat mode? otherwise deal with the large non-visible part of the canvas?
+## TODO need to remove IDs of tile fetch jobs if they become superseded, e.g. user zooms twice in quick succession
+
 image_def_from_view <- function(initial_view, zoom = 1) {
     ## xy centres of tiles in normalized [-1 1 -1 1] coords
     temp_xygrid <- expand.grid(x = seq(-1, 1, length.out = initial_view$tiles_per_side + 1)[-1] - 1 / initial_view$tiles_per_side,
@@ -39,7 +43,7 @@ xywh_to_ext <- function(x, y, w, h) unname(c(x + c(-1, 1) * w / 2, y + c(-1, 1) 
 # @param min_scale scalar: the smallest cell size (in projected units), used when maximally zoomed in
 ## no, min_scale should be determined by the data. Or maybe allow min_scale to be specified but by default it's NA, in which case it falls back to the native data res
 #' @param initial_view list: a named list with components:
-#' * tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even? TODO note that >2 currently doesn't work properly when zooming
+#' * tiles_per_side integer: e.g. a value of 2 means that we will generate the image as 2x2 set of tiles. If > 1 must be even, and the x- and y-extents must be even multiples of the number of tiles per side
 #' * extent numeric: the initial image extent c(xmin, xmax, ymin, ymax) in projected coordinates
 #' * res numeric: the resolution (in m) to use for the image when shown at its intial extent. The resolution will change as the map is zoomed in/out
 #' * max_extent numeric: as for `extent`, but defining the limits that will be shown. The map will not be extended beyond these bounds as it is zoomed/panned. If not provided, the initial extent will be used
@@ -111,7 +115,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
     moduleServer(id, function(input, output, session) {
         tmpd <- tempfile()
         dir.create(tmpd)
-        cat("plots temporary directory is:", tmpd, "\n")
+        if (.debug > 0) cat("plots temporary directory is:", tmpd, "\n")
         onSessionEnded(function() unlink(tmpd, recursive = TRUE))
         addResourcePath("plots", tmpd)
 
@@ -140,16 +144,11 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         ## generate our image_def from the user-supplied initial_view
         ## initial_view is list(tiles_per_side, extent(xmin, xmax, ymin, ymax), res)
 
-        ## initial native image size
-        ## width: diff(initial_view$extent[1:2]) / initial_view$res
-        ## height: diff(initial_view$extent[3:4]) / initial_view$res
-
         ## tile width and height in map coords
         tile_w <- diff(initial_view$extent[1:2]) / initial_view$tiles_per_side
         tile_h <- diff(initial_view$extent[3:4]) / initial_view$tiles_per_side
 
         ## we need the view to be defined such that the xy extents are multiples of the number of tiles per side
-        ## TODO or even multiples? or powers of 2?
         if (initial_view$tiles_per_side <= 0 || (initial_view$tiles_per_side / floor(initial_view$tiles_per_side) != 1)) stop("initial_view$tiles_per_side must be an even positive integer")
         if (initial_view$tiles_per_side > 1) {
             if (initial_view$tiles_per_side %% 2 != 0) stop("initial_view$tiles_per_side must be 1 or an even positive integer")
@@ -165,7 +164,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         observeEvent(input$request_init, {
             extstr <- paste0("[", initial_view$extent[1], ",", initial_view$extent[2], ",", initial_view$extent[3], ",", initial_view$extent[4], "];")
             maxextstr <- paste0("[", initial_view$max_extent[1], ",", initial_view$max_extent[2], ",", initial_view$max_extent[3], ",", initial_view$max_extent[4], "];")
-            ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];") ## TODO allow centre to be specifed as something else?
+            ctrstr <- paste0("[", (initial_view$extent[1] + initial_view$extent[2]) / 2, ",", (initial_view$extent[3] + initial_view$extent[4]) / 2, "];")
             alstr <- paste0("[", paste(sapply(layerdef(), function(w) w$z), collapse = ","), "];") ## active layers, 1-indexed
             evaljs("cm_", id, ".xsc=", diff(initial_view$extent[1:2]) / image_wh, ";",
                    "cm_", id, ".ysc=", diff(initial_view$extent[3:4]) / image_wh, ";",
@@ -176,7 +175,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                    "cm_", id, ".res=", initial_view$res, ";",
                    "cm_", id, ".viewport_ctr=", ctrstr,
                    "cm_", id, ".active_layers=", alstr,
-                   "cm_", id, ".select_mode='pan';", ## TODO check that it matches input on startup
+                   "cm_", id, ".select_mode='pan';",
                    "cm_", id, ".ext=", extstr, "cm_", id, ".ext0=", maxextstr
                    )
             init_done <<- TRUE
@@ -201,7 +200,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         })
 
         observeEvent(input$do_zoom, {
-            cat("do_zoom: ", input$do_zoom, "\n")
+            if (.debug > 0) cat("do_zoom: ", input$do_zoom, "\n")
             if (.clear_on_zoom) clear_tiles_data()
             i <- image_def()
             i$ext <- input$do_zoom[1:4]
@@ -211,7 +210,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         })
 
         observeEvent(input$pan_extend, {
-            cat("pan extend: ", input$pan_extend, "\n")
             ## update the image_def()$ext to the new value just sent through
             if (.debug > 0) cat("--> extending tiles\n")
             if (.clear_on_pan) clear_tiles_data()
@@ -220,22 +218,22 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             image_def(i) ## update the image reactive
         })
 
-        send_plot <- function(plot_contents, plotnum, image_def, ext_mu, clear = .clear_canvas_before_drawing, as = "file") { ## x = 0, y = 0, w = image_wh, h = image_wh, 
+        send_plot <- function(plot_contents, plotnum, image_def, ext_mu, clear = .clear_canvas_before_drawing, as = "file") {
             ## send_plot is used for vector layers, not tiled layers (see draw_tile for those)
-            cat("sendplot: plot", plotnum, "updated, sending to js ")
+            if (.debug > 0) cat("sendplot: plot", plotnum, "updated, sending to js ")
             plotid <- paste0(id, "-plot", plotnum)
             if (missing(ext_mu)) ext_mu <- image_def$ext
             ## idef <- isolate(image_def())
             if (as == "svg" && !.svg_as_file) {
-                cat("as svg\n")
+                if (.debug > 0) cat("as svg\n")
                 plot_contents <- paste0("data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)))
             } else {
                 ## plot_contents is a file or raw vector
                 if (is.raw(plot_contents)) {
-                    cat("as b64 png from raw\n")
+                    if (.debug > 0) cat("as b64 png from raw\n")
                     plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
                 } else {
-                    cat("as image from file\n")
+                    if (.debug > 0) cat("as image from file\n")
                     plot_contents <- paste0("plots/", basename(plot_contents))
                 }
             }
@@ -244,7 +242,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
 
         clear_plot <- function(plotnum) {
             ## can be multiple plotnums
-            cat("clearing plot", plotnum, "\n")
+            if (.debug > 0) cat("clearing plot", plotnum, "\n")
             evaljs(paste0("var this_ctx = ", id, "_ctxlist[", plotnum, "]; if (this_ctx) { this_ctx.clearRect(0, 0, ", image_wh, ", ", image_wh, "); }"))
             vector_plot_sources[plotnum] <<- NA_character_
         }
@@ -297,7 +295,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             }))
             if (.debug > 1) {
                 temp <- proc.time()["elapsed"] - temp
-                message("data matrix assembly time: ", round(temp, 3), "s")
+                cat("data matrix assembly time:", round(temp, 3), "s")
             }
             out
         }
@@ -326,65 +324,28 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         }
 
         draw_tile <- function(z, td, i, image_def, layerdef, clear = TRUE, as = "file") {
-            message("draw_tile for layer ", z, ", index ", i)
+            if (.debug > 0) cat("draw_tile for layer ", z, ", index ", i, "\n", sep = "")
             ## z is the layer index (e.g. into tiles_data
             ## td is that tiles_data entry
             ## i is the index within the layer (> 1 if we have multiple tiles per side)
-## this should not be needed now because we do an initial re-draw of each canvas on the client side after panning or zooming
-##             if (clear) {
-##                 ## if we are about to draw a tile, then we also need to clear the tiles that have NULL data (e.g. we've just panned, and we don't yet have data for some tiles. If we don't clear these, the old tiles will remain shown)
-##                 for (j in setdiff(seq_along(td$img$data), i)) {
-##                     if (is.null(td$img$data[[j]])) {
-##                         message("img data is NULL for tile ", j, ", clearing tile")
-##                         message("TODO adjust clear code for zooming!") ## TODO
-## ##                        ## image_def$xy_grid gives the xy centres of tiles in normalized [-1 1 -1 1] coords
-## ##                        half_nwh <- 2 / image_def$tiles_per_side / 2 ## tile half-width and half-height in normalized [-1 1 -1 1] coords
-## ##                        xn <- (image_def$xy_grid$x[j] + c(-half_nwh, half_nwh) + 1)/2 ## x-extent of tile in 0-1 coords
-## ##                        yn <- 1 - (image_def$xy_grid$y[j] + c(-half_nwh, half_nwh) + 1) / 2 ## y-extent of tile in 0-1 coords
-## ##                        cat("xn is: ", xn, ", yn is: ", yn, "\n")
-## ##                        tlp <- c(xn[1], yn[2]) * image_wh
-## ##                        brp <- c(xn[2], yn[1]) * image_wh
-## ##                        js <- paste0("this_ctx = ", id, "_ctxlist[", z, "]; this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", abs(brp[1] - tlp[1]), ", ", abs(brp[2] - tlp[2]), ");")
-## ##                        evaljs(js)
-##                     }
-##                 }
-##             }
             ## send tile to canvas
             plot_contents <- tile_to_png(td = td, i = i, layerdef = layerdef[[z]], cache = cache, res = .plotres, use_fastpng = .use_fastpng, png_compression_level = .png_compression_level, use_png_filter = .use_png_filter, png_in_memory = .png_in_memory, debug = .debug, tmpd = tmpd)
             if (!is.null(plot_contents)) {
-                iext_mu <- image_def$ext ## data extent in map units
                 tile_ext_mu <- attr(td$img$data[[i]], "extent")
-                ## the normalized x and y extents of this tile in that canvas extent
-                xn <- (tile_ext_mu[1:2] - iext_mu[1]) / diff(iext_mu[1:2])
-                yn <- 1 - (tile_ext_mu[3:4] - iext_mu[3]) / diff(iext_mu[3:4]) ## 1 - because we draw from top
-                ## and thus the region in pixels in the canvas for this tile
-                tlp <- c(xn[1], yn[2]) * image_wh
-                brp <- c(xn[2], yn[1]) * image_wh
-
-                cat("xn is: ", xn, ", yn is: ", yn, "\n")
-                ## top-left/bottom-right (in pixels) of this tile in the image, remembering that the canvas origin (0, 0) is top-left
-                                        #            tlp <- (image_def$xy_grid[i, ] + 1)/2 + 1/image_def$tiles_per_side/2 * c(-1, 1); tlp[2] <- 1 - tlp[2]; tlp <- tlp * image_wh
-                                        #            brp <- (image_def$xy_grid[i, ] + 1)/2 + 1/image_def$tiles_per_side/2 * c(1, -1); brp[2] <- 1 - brp[2]; brp <- brp * image_wh
-
-                cat("sending tile to js ")
+                if (.debug > 0) cat("sending tile to js ")
                 plotid <- paste0(id, "-plot", z)
-
-                ## send the extent in map units to the client and let it work out the tlbr coords in the canvas
+                ## send the extent in map units to the client and let it work out the tl/br coords in the canvas
                 if (as == "svg" && !.svg_as_file) {
-                    cat("as svg\n")
+                    if (.debug > 0) cat("as svg\n")
                     ## plot contents is an svg string
-                    ## js <- paste0("var image_", id, "_", z, " = new Image(); image_", id, "_", z, ".onload = function() { this_ctx = ", id, "_ctxlist[", z, "];",
-                    ##              if (clear) paste0("this_ctx.clearRect(", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], ");"),
-                    ##              "this_ctx.imageSmoothingEnabled = false; this_ctx.drawImage(this, ", tlp[1], ", ", tlp[2], ", ", brp[1] - tlp[1], ", ", brp[2] - tlp[2], "); ", panjs, "}; image_", id, "_", z, ".src = 'data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)), "';")
-                    ## evaljs(js)
                     plot_contents <- paste0("data:image/svg+xml;base64,", base64enc::base64encode(charToRaw(plot_contents)))
                 } else {
                     ## plot_contents is a file or raw vector
                     if (is.raw(plot_contents)) {
-                        cat("as b64 png from raw\n")
+                        if (.debug > 0) cat("as b64 png from raw\n")
                         plot_contents <- paste0("data:image/png;base64,", base64enc::base64encode(plot_contents))
                     } else {
-                        cat("as image from file\n")
+                        if (.debug > 0) cat("as image from file\n")
                         plot_contents <- paste0("plots/", basename(plot_contents))
                     }
                 }
@@ -411,16 +372,15 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         }
 
         update_tiles_data <- function(imgdef, z = 1) {
-            cat("--> in update_tiles_data() for layer", z, "\n")
+            if (.debug > 0) cat("--> in update_tiles_data() for layer", z, "\n")
             isolate({
-                ## cat("updating tiles data for z =", utils::capture.output(utils::str(z)), "\n")
                 xy_hash <- rlang::hash(list(imgdef, layerdef()[[z]])) ##^^^ is xy_hash needed/used??
                 saved_hash <- isolate(tiles_data[[as.character(z)]])$xy_hash
-                if (.debug > 1) message("xy_hash is: ", xy_hash, ", saved hash is: ", saved_hash)
+                if (.debug > 1) cat("xy_hash is:", xy_hash, ", saved hash is: ", saved_hash, "\n", sep = "")
                 if (identical(xy_hash, saved_hash)) {
-                    if (.debug > 1) message("not updating tiles_data ", z, " - xy_hash is unchanged")
+                    if (.debug > 1) cat("not updating tiles_data", z, "- xy_hash is unchanged\n")
                 } else {
-                    if (.debug > 1) message("updating tiles_data ", z)
+                    if (.debug > 1) cat("updating tiles_data", z, "\n")
                     ## generate new IDs, one per tile
                     ids <- uuid::UUIDgenerate(n = nrow(imgdef$xy_grid))
                     td <- isolate(tiles_data[[as.character(z)]])
@@ -436,7 +396,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             xy <- ext_to_c_mu(extent = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             twh <- tile_wh_mu(ext = imgdef$ext, tiles_per_side = imgdef$tiles_per_side)
             this_ext <- xywh_to_ext(x = xy$x[i], y = xy$y[i], w = twh[1], h = twh[2])
-            if (.debug > 1) message("fetching data: ext ", this_ext, ", res ", imgdef$res)
+            if (.debug > 1) cat("fetching data: ext ", this_ext, ", res ", imgdef$res, "\n", sep = "")
             ld <- layerdef()[[z]]
             rgs <- list(ext = this_ext, dsn = ld$dsn, res = imgdef$res, type = ld$type, target_crs = target_crs(), warp_opts = .warp_opts, resampling = .resampling_method)
             key <- key_from_args(rgs)
@@ -445,10 +405,10 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 result$i <- i
                 result$id <- ids[i]
                 result$z <- z
-                if (.debug > 2) message("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
+                if (.debug > 2) cat("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n", sep = "")
                 handle_tile_data(result)
             } else {
-                if (.debug > 2) message("key ", key, " not in cache")
+                if (.debug > 2) cat("key ", key, " not in cache\n", sep = "")
                 if (use_mirai) {
                     rgs <- c(rgs, list(z = z, i = i, id = ids[i], key = key))
                     mirai_fetch_tile(rgs, key)
@@ -466,9 +426,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         mirai_queue <- list()
         mirai_fetch_tile <- function(rgs, key) {
             ## if a fetch request is already happening with this key, don't re-issue a new fetch request
-            if (key %in% sapply(mirai_queue, function(job) job$key)) {
-                ## cat("request with key", key, "is already in the queue, not re-queueing\n")
-            } else {
+            if (!key %in% sapply(mirai_queue, function(job) job$key)) {
                 ## cat("fetching:\n"); cat(utils::str(rgs))
                 ##if (.debug > 1)
                 if (.debug > 2) temp <- proc.time()["elapsed"]
@@ -480,7 +438,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 }
                 if (.debug > 2) {
                     temp <- proc.time()["elapsed"] - temp
-                    message("mirai dispatch time: ", round(temp, 3), "s")
+                    cat("mirai dispatch time: ", round(temp, 3), "s\n", sep = "")
                 }
                 if (!is.null(mid)) mirai_queue[[length(mirai_queue) + 1]] <<- list(mid = mid, key = key)
             }
@@ -492,7 +450,6 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
             for (ji in seq_along(mirai_queue)) {
                 job <- mirai_queue[[ji]]$mid
                 if (!inherits(job, "mirai")) {
-                    cat("job on queue is not a mirai job:"); cat(utils::str(job))
                     done <- c(done, ji)
                 } else {
                     if (!mirai::unresolved(job)) {
@@ -500,11 +457,11 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                         done <- c(done, ji)
                         result_was_ok <- !mirai::is_mirai_error(result) && !is.null(result) && tryCatch({ result$key; TRUE }, error = function(e) FALSE) ## sometimes we just get an error string back
                         if (result_was_ok) {
-                            if (.debug > 2) message("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)))
+                            if (.debug > 2) cat("got async data type", result$type, "for layer", result$z, "tile", result$i, "(id", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n", sep = "")
                             if (!is.null(cache)) cache$set(result$key, result[setdiff(names(result), c("z", "i", "id", "key"))]) ## cache it
                             handle_tile_data(result)
                         } else {
-                            cat("async data failed: ", result, "\n")
+                            if (.debug > 0) cat("async data failed: ", result, "\n")
                         }
                     }
                 }
@@ -516,7 +473,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         observe({
             req(image_def(), target_crs())
             if (init_done) {
-cat("--> in vector layer plotter\n")
+                if (.debug > 0) cat("--> in vector layer plotter\n")
             ## deal with non-raster layers for which the user has provided a plot function
                 for (i in seq_along(layerdef())) do_vector_plot(i, image_def = image_def(), crs = target_crs())
             } else {
@@ -531,7 +488,7 @@ cat("--> in vector layer plotter\n")
             if (!is.null(ld[[i]]) && "fun" %in% names(ld[[i]])) {
                 z <- ld[[i]]$z
                 pltf <- tempfile(tmpdir = tmpd, fileext = if (.use_ugd) ".svg" else ".png")
-                cat("rendering plot", i, "layer", z, "as", if (.use_ugd && .svg_as_file) paste("svg file", pltf) else if (.use_ugd) "svg" else paste("png", pltf), "\n")
+                if (.debug > 0) cat("rendering plot", i, "layer", z, "as", if (.use_ugd && .svg_as_file) paste("svg file", pltf) else if (.use_ugd) "svg" else paste("png", pltf), "\n")
                 ##tictoc::tic()
                 if (!.use_ugd) {
                     png(pltf, height = image_wh, width = image_wh, res = .plotres, bg = NA)
@@ -581,7 +538,7 @@ cat("--> in vector layer plotter\n")
 
         observeEvent(input$reproj, {
             if (isTRUE(input$reproj$crs != target_crs())) {
-                cat("reproj: ", utils::str(input$reproj), "\n")
+                if (.debug > 0) cat("reproj: ", utils::str(input$reproj), "\n")
                 i <- image_def()
                 i$ext <- unlist(input$reproj$extent)
                 image_def(i) ## update the image reactive

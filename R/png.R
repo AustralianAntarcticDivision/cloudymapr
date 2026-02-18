@@ -8,13 +8,13 @@ tile_to_png <- function(..., cache, res, use_fastpng, png_compression_level, use
     ## key <- rlang::hash(keydata)
     ## if (!is.null(cache) && cache$exists(key)) {
     ##     if (file.exists(cache$get(key))) {
-    ##         if (debug > 0) message("got cached png with key: ", key)
+    ##         if (debug > 0) cat("got cached png with key: ", key, "\n", sep = "")
     ##         return(cache$get(key))
     ##     } else {
     ##         cache$remove(key)
     ##     }
     ## }
-    ## if (debug > 0) message("no cached png available")
+    ## if (debug > 0) cat("no cached png available\n")
     pltf <- tile_to_png_inner(..., res = res, use_fastpng = use_fastpng, png_compression_level = png_compression_level, use_png_filter = use_png_filter, png_in_memory = png_in_memory, debug = debug, tmpd = tmpd)
     ## if (!is.null(cache) && !is.null(pltf)) cache$set(key, pltf) ## cache it
     pltf
@@ -23,12 +23,12 @@ tile_to_png <- function(..., cache, res, use_fastpng, png_compression_level, use
 tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression_level, use_png_filter, png_in_memory, debug = 0, tmpd) {
     if (i > length(td$img$data) || is.null(td$img$data[[i]][[1]])) return(NULL)
     pltf <- if (use_fastpng && png_in_memory) NULL else tempfile(tmpdir = tmpd, fileext = ".png")
-    if (debug > 0) message("rendering raster tile to png:", pltf)
+    if (debug > 0) cat("rendering raster tile to png:", pltf, "\n")
     if (use_fastpng) {
         if (layerdef$type == "raster_data") {
             cmap <- layerdef$cmap[[1]]
             zl <- if (is.null(layerdef$zlims[[1]]) && !is.function(cmap)) stop("need z limits") else layerdef$zlims[[1]] ## NULL zlims ok if function?
-            if (debug > 0) message("  zlim is:", zl[1], " to ", zl[2], "\n")
+            if (debug > 0) cat("  zlim is:", zl[1], " to ", zl[2], "\n", sep = "")
             ## construct matrix
             if (!is.null(attr(td$img$data[[i]], "gis"))) {
                 ## gdalraster format
@@ -82,7 +82,7 @@ tile_to_png_inner <- function(td, i, layerdef, res, use_fastpng, png_compression
         if ("extra_args" %in% names(layerdef) && !is.null(layerdef$extra_args[[1]])) rgs <- c(rgs, layerdef$extra_args[[1]])
         ## temp <- proc.time()["elapsed"]
         pltf <- do.call(fastpng::write_png, rgs)
-        ## message("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"))
+        ## cat("png generation time: ", round(proc.time()["elapsed"] - temp, 3), "s", if (!png_in_memory) paste0(", png file size: ", round(file.size(pltf) / 1e6, 1), "MB"), "\n", sep = "")
     } else {
         stop("not coded")
     }

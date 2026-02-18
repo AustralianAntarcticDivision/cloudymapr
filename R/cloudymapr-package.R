@@ -11,7 +11,7 @@
 #' @importFrom magrittr %>%
 #' @importFrom methods new
 #' @importFrom sf st_as_sf st_coordinates `st_crs<-` st_geometry st_transform
-#' @importFrom shiny actionButton addResourcePath checkboxInput column fluidPage fluidRow HTML icon invalidateLater is.reactive isolate moduleServer NS observe observeEvent onSessionEnded reactive reactiveVal renderUI req selectInput shinyApp singleton tags tagList uiOutput wellPanel
-#' @importFrom stats runif
+#' @importFrom shiny actionButton addResourcePath checkboxInput column fluidPage fluidRow HTML icon invalidateLater is.reactive isolate moduleServer NS observe observeEvent onSessionEnded reactive reactiveVal reactiveValues renderUI req selectInput shinyApp singleton tags tagList uiOutput wellPanel
+#' @importFrom stats runif setNames
 #' @importFrom tibble tibble
 "_PACKAGE"

@@ -30,8 +30,6 @@ cache_fetch_tile <- function(imgdef, z, i, layerdef, crs, warp_opts, resampling_
     cat("fetching data: ext ", this_ext, ", res ", imgdef$res, "\n")
     rgs <- list(ext = this_ext, dsn = layerdef[[z]]$dsn, res = imgdef$res, type = layerdef[[z]]$type, target_crs = crs, warp_opts = warp_opts, resampling = resampling_method)
     key <- key_from_args(rgs)
-    cat(str(key))
-    cat(str(rgs))
     if (!cache$exists(key)) {
         ## cat("fetching:\n"); cat(utils::str(rgs))
         result <- do.call(fetch_a_tile, c(rgs, list(z = z)))
