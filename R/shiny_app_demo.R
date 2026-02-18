@@ -216,6 +216,10 @@ vl_demo <- function() {
                 }
             }
         })
+
+        ## to generate the files in the extdata/demo/cache_seed directory:
+        ## browser()
+        ## seed_cache(isolate(layerdef()), initial_view = iv, target_crs, warp_opts = .warp_opts, resampling_method = .resampling_method, zoom_levels = c(1, 2), cache = cachem::cache_disk(system.file("extdata/demo/cache_seed", package = "cloudymapr", mustWork = TRUE), extension = ""))
     }
 
     shinyApp(ui, server)

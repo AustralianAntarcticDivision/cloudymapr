@@ -405,10 +405,10 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 result$i <- i
                 result$id <- ids[i]
                 result$z <- z
-                if (.debug > 2) cat("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n", sep = "")
+                if (.debug > 1) cat("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n", sep = "")
                 handle_tile_data(result)
             } else {
-                if (.debug > 2) cat("key ", key, " not in cache\n", sep = "")
+                if (.debug > 1) cat("key ", key, " not in data cache\n", sep = "")
                 if (use_mirai) {
                     rgs <- c(rgs, list(z = z, i = i, id = ids[i], key = key))
                     mirai_fetch_tile(rgs, key)
