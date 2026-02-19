@@ -548,6 +548,8 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         set_crs <- function(crs) evaljs(paste0("cm_", id, ".reproj('", crs, "');")) ## reprojection happens client-side first, then triggers the input$reproj block above
         get_crs <- reactive(target_crs())
 
-        list(click = mapclick, layer_data = layer_data, set_crs = set_crs, crs = get_crs)
+        info <- reactive(image_def()) ## i.e. a read-only copy
+
+        list(click = mapclick, layer_data = layer_data, set_crs = set_crs, crs = get_crs, info = info)
     })
 }
