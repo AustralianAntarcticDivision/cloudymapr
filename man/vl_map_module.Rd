@@ -49,7 +49,7 @@ The UI and server components of a Shiny module. When instantiated, the server re
 \item set_crs TBD:
 \item crs reactiveVal (string): the current map coordinate reference system
 \item info reactive: a reactive function that returns a list with information about the map. Of possible user interest are the \code{ext} (the current extent of the map canvas, in map units), \code{zoom} (current zoom level), and \code{res} (grid cell resolution, in map units) components of that list
-\item plot_updated reactiveVal: a counter (starting from 0) that is incremented each time the plot output is updated
+\item plot_updated reactiveVal: is set to the layer number (index into layerdef) when the corresponding plot output is updated
 }
 }
 \description{

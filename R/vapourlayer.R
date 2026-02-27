@@ -56,7 +56,7 @@ xywh_to_ext <- function(x, y, w, h) unname(c(x + c(-1, 1) * w / 2, y + c(-1, 1) 
 #' * set_crs TBD:
 #' * crs reactiveVal (string): the current map coordinate reference system
 #' * info reactive: a reactive function that returns a list with information about the map. Of possible user interest are the `ext` (the current extent of the map canvas, in map units), `zoom` (current zoom level), and `res` (grid cell resolution, in map units) components of that list
-#' * plot_updated reactiveVal: a counter (starting from 0) that is incremented each time the plot output is updated
+#' * plot_updated reactiveVal: is set to the layer number (index into layerdef) when the corresponding plot output is updated
 #'
 # @examples
 #'
@@ -368,7 +368,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                          )
             if (do_eval) {
                 evaljs(js)
-                updated(isolate(updated()) + 1L)
+                updated(z)
                 invisible(js)
             } else {
                 js
