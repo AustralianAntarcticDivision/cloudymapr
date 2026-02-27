@@ -51,8 +51,12 @@ xywh_to_ext <- function(x, y, w, h) unname(c(x + c(-1, 1) * w / 2, y + c(-1, 1) 
 #' @param cache logical or cachem: either TRUE/FALSE to use/not the default memory-based cache, or a `cachem` object (as returned by e.g. [cachem::cache_mem()])
 #'
 #' @return The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
-#' * click function:
+#' * click reactiveVal: data from a click on the map object (the coordinates of the click in map units, then in pixels relative to the canvas top-left, then the mouse button number)
 #' * layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a `terra::rast` object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
+#' * set_crs TBD:
+#' * crs reactiveVal (string): the current map coordinate reference system
+#' * info reactive: a reactive function that returns a list with information about the map. Of possible user interest are the `ext` (the current extent of the map canvas, in map units), `zoom` (current zoom level), and `res` (grid cell resolution, in map units) components of that list
+#' * plot_updated reactiveVal: a counter (starting from 0) that is incremented each time the plot output is updated
 #'
 # @examples
 #'
@@ -364,6 +368,7 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                          )
             if (do_eval) {
                 evaljs(js)
+                updated(isolate(updated()) + 1L)
                 invisible(js)
             } else {
                 js
@@ -404,10 +409,10 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
                 result$i <- i
                 result$id <- ids[i]
                 result$z <- z
-                if (.debug > 1) cat("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n", sep = "")
+                if (.debug > 0) cat("got cached data for layer ", z, " tile ", result$i, " (id ", result$id, ")", utils::capture.output(utils::str(result$data, max.level = 1)), "\n", sep = "")
                 handle_tile_data(result)
             } else {
-                if (.debug > 1) cat("key ", key, " not in data cache\n", sep = "")
+                if (.debug > 0) cat("key ", key, " not in data cache\n", sep = "")
                 if (use_mirai) {
                     rgs <- c(rgs, list(z = z, i = i, id = ids[i], key = key))
                     mirai_fetch_tile(rgs, key)
@@ -549,7 +554,8 @@ vl_map_server <- function(id, image_wh = 4096, initial_view = list(tiles_per_sid
         get_crs <- reactive(target_crs())
 
         info <- reactive(image_def()) ## i.e. a read-only copy
+        updated <- reactiveVal(0L)
 
-        list(click = mapclick, layer_data = layer_data, set_crs = set_crs, crs = get_crs, info = info)
+        list(click = mapclick, layer_data = layer_data, set_crs = set_crs, crs = get_crs, info = info, plot_updated = updated)
     })
 }

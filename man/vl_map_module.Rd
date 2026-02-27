@@ -44,8 +44,12 @@ vl_map_server(
 \value{
 The UI and server components of a Shiny module. When instantiated, the server returns a list with components:
 \itemize{
-\item click function:
+\item click reactiveVal: data from a click on the map object (the coordinates of the click in map units, then in pixels relative to the canvas top-left, then the mouse button number)
 \item layer_data list: a list of reactive objects, where each object contains the raster data associated with the corresponding layer (as a \code{terra::rast} object). Note that the data will be NULL for anything other than a raster layer of type "raster_data" (i.e. "raster_image_rgb", "raster_image_grey", or vector layers will all be NULL)
+\item set_crs TBD:
+\item crs reactiveVal (string): the current map coordinate reference system
+\item info reactive: a reactive function that returns a list with information about the map. Of possible user interest are the \code{ext} (the current extent of the map canvas, in map units), \code{zoom} (current zoom level), and \code{res} (grid cell resolution, in map units) components of that list
+\item plot_updated reactiveVal: a counter (starting from 0) that is incremented each time the plot output is updated
 }
 }
 \description{
